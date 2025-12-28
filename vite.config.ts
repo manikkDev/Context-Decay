@@ -158,7 +158,9 @@ function devApiPlugin(): Plugin {
   return {
     name: 'dev-api',
     configureServer(server) {
-      server.middlewares.use('/__api/fetch-url', fetchUrlMiddleware())
+      const fetchUrl = fetchUrlMiddleware()
+      server.middlewares.use('/__api/fetch-url', fetchUrl)
+      server.middlewares.use('/api/fetch-url', fetchUrl)
 
       server.middlewares.use('/__api/decay', async (req, res) => {
         if (req.method !== 'POST') {
@@ -206,7 +208,9 @@ function devApiPlugin(): Plugin {
       })
     },
     configurePreviewServer(server) {
-      server.middlewares.use('/__api/fetch-url', fetchUrlMiddleware())
+      const fetchUrl = fetchUrlMiddleware()
+      server.middlewares.use('/__api/fetch-url', fetchUrl)
+      server.middlewares.use('/api/fetch-url', fetchUrl)
     },
   }
 }

@@ -196,7 +196,7 @@ function validateAssumptions(extracted: Assumption[], anchors: RealityAnchor[]):
 }
 
 async function fetchUrlText(url: string): Promise<{ resolvedUrl: string; text: string }> {
-  const res = await fetch('/__api/fetch-url', {
+  const res = await fetch('/api/fetch-url', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ url }),
@@ -225,7 +225,7 @@ async function fetchUrlText(url: string): Promise<{ resolvedUrl: string; text: s
   } catch (err) {
     const msg = formatError(err)
     if (/failed to fetch/i.test(msg) || /networkerror/i.test(msg)) {
-      throw new Error('URL fetch blocked (likely CORS). Use the Text tab, or run via the dev server proxy.')
+      throw new Error('URL fetch blocked (likely CORS). Use the Text tab, or try a different URL.')
     }
     throw err
   }
