@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.admin == true;
+    }
+
+    function devOpen() {
+      return exists(/databases/$(database)/documents/config/dev) && get(/databases/$(database)/documents/config/dev).data.open == true;
+    }
+
+    match /config/dev {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /realityAnchors/{docId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /analysisSessions/{docId} {
+      allow read, write: if isAuthenticated() || devOpen();
+    }
+
+    match /firestore_connection_check/{docId} {
+      allow read, write: if isAuthenticated() || devOpen();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

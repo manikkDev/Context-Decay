@@ -1,0 +1,162 @@
+[
+  {
+    "id": "create-react-app.deprecated",
+    "domain": "create-react-app",
+    "key": "create-react-app.deprecated",
+    "type": "deprecation",
+    "description": "Create React App is deprecated; migrate to modern tooling.",
+    "effectiveFrom": "2023-02-01",
+    "severity": "high",
+    "citationUrl": "https://github.com/facebook/create-react-app/releases"
+  },
+  {
+    "id": "react.strictmode.double-invoke",
+    "domain": "react",
+    "key": "react.strictmode.double-invoke",
+    "type": "behavioral-change",
+    "description": "StrictMode may double-invoke renders/effects in development.",
+    "effectiveFrom": "2021-10-01",
+    "severity": "medium",
+    "citationUrl": "https://react.dev/reference/react/StrictMode"
+  },
+  {
+    "id": "react.18.createRoot.required",
+    "domain": "react",
+    "key": "react.18.createRoot.required",
+    "type": "breaking-change",
+    "description": "ReactDOM.render is replaced by the createRoot API in React 18.",
+    "effectiveFrom": "2022-03-29",
+    "severity": "high",
+    "citationUrl": "https://react.dev/blog/2022/03/29/react-v18"
+  },
+  {
+    "id": "react.18.automatic-batching",
+    "domain": "react",
+    "key": "react.18.automatic-batching",
+    "type": "behavioral-change",
+    "description": "More updates are automatically batched, changing update timing.",
+    "effectiveFrom": "2022-03-29",
+    "severity": "medium",
+    "citationUrl": "https://react.dev/blog/2022/03/29/react-v18"
+  },
+  {
+    "id": "react.18.useId.hydration",
+    "domain": "react",
+    "key": "react.18.useId.hydration",
+    "type": "behavioral-change",
+    "description": "useId creates stable IDs for hydration; misuse can cause mismatch.",
+    "effectiveFrom": "2022-03-29",
+    "severity": "low",
+    "citationUrl": "https://react.dev/reference/react/useId"
+  },
+  {
+    "id": "react.18.useSyncExternalStore",
+    "domain": "react",
+    "key": "react.18.useSyncExternalStore",
+    "type": "breaking-change",
+    "description": "External stores should use useSyncExternalStore for concurrent safety.",
+    "effectiveFrom": "2022-03-29",
+    "severity": "medium",
+    "citationUrl": "https://react.dev/reference/react/useSyncExternalStore"
+  },
+  {
+    "id": "react-router.v6.routes-switch",
+    "domain": "react-router",
+    "key": "react-router.v6.routes-switch",
+    "type": "breaking-change",
+    "description": "Switch is replaced by Routes and route matching semantics change.",
+    "effectiveFrom": "2021-11-15",
+    "severity": "high",
+    "citationUrl": "https://reactrouter.com/en/main/upgrading/v5"
+  },
+  {
+    "id": "react-router.v6.navigate-api",
+    "domain": "react-router",
+    "key": "react-router.v6.navigate-api",
+    "type": "breaking-change",
+    "description": "useHistory is replaced by useNavigate; navigation APIs differ.",
+    "effectiveFrom": "2021-11-15",
+    "severity": "medium",
+    "citationUrl": "https://reactrouter.com/en/main/upgrading/v5"
+  },
+  {
+    "id": "react-router.v6.4.data-routers",
+    "domain": "react-router",
+    "key": "react-router.v6.4.data-routers",
+    "type": "breaking-change",
+    "description": "Data routers introduce loaders/actions and new router creation patterns.",
+    "effectiveFrom": "2022-09-13",
+    "severity": "medium",
+    "citationUrl": "https://reactrouter.com/en/main/routers/create-browser-router"
+  },
+  {
+    "id": "vite.env-prefix",
+    "domain": "vite",
+    "key": "vite.env-prefix",
+    "type": "policy",
+    "description": "Only environment variables prefixed with VITE_ are exposed to clients.",
+    "effectiveFrom": "2021-04-20",
+    "severity": "medium",
+    "citationUrl": "https://vite.dev/guide/env-and-mode"
+  },
+  {
+    "id": "vite.cra-migration.defaults",
+    "domain": "vite",
+    "key": "vite.cra-migration.defaults",
+    "type": "behavioral-change",
+    "description": "Vite defaults differ from CRA, including dev server and env handling.",
+    "effectiveFrom": "2021-04-20",
+    "severity": "low",
+    "citationUrl": "https://vite.dev/guide/"
+  },
+  {
+    "id": "tailwind.v3.jit-default",
+    "domain": "tailwindcss",
+    "key": "tailwind.v3.jit-default",
+    "type": "behavioral-change",
+    "description": "JIT is default; styles are generated on-demand from class usage.",
+    "effectiveFrom": "2021-12-09",
+    "severity": "low",
+    "citationUrl": "https://tailwindcss.com/blog/tailwindcss-v3"
+  },
+  {
+    "id": "eslint.react-hooks.exhaustive-deps",
+    "domain": "eslint",
+    "key": "eslint.react-hooks.exhaustive-deps",
+    "type": "policy",
+    "description": "Hook linting enforces effect dependencies; unstable deps cause reruns.",
+    "effectiveFrom": "2019-02-11",
+    "severity": "medium",
+    "citationUrl": "https://react.dev/learn/synchronizing-with-effects#step-2-specify-the-effect-dependencies"
+  },
+  {
+    "id": "firebase.web-v9-modular",
+    "domain": "firebase",
+    "key": "firebase.web-v9-modular",
+    "type": "breaking-change",
+    "description": "Firebase JS SDK moved to modular v9 imports from namespaced APIs.",
+    "effectiveFrom": "2021-08-26",
+    "severity": "high",
+    "citationUrl": "https://firebase.google.com/docs/web/modular-upgrade"
+  },
+  {
+    "id": "typescript.esm-node-next",
+    "domain": "typescript",
+    "key": "typescript.esm-node-next",
+    "type": "behavioral-change",
+    "description": "NodeNext module resolution affects ESM imports and package exports.",
+    "effectiveFrom": "2022-11-18",
+    "severity": "medium",
+    "citationUrl": "https://www.typescriptlang.org/docs/handbook/esm-node.html"
+  },
+  {
+    "id": "react.dev-docs-migration",
+    "domain": "react",
+    "key": "react.dev-docs-migration",
+    "type": "policy",
+    "description": "Official React docs moved to react.dev; older tutorials may be stale.",
+    "effectiveFrom": "2023-03-16",
+    "severity": "low",
+    "citationUrl": "https://react.dev/"
+  }
+]

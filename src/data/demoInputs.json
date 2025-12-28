@@ -1,0 +1,29 @@
+[
+  {
+    "id": "hard-decay-broken-api",
+    "title": "Hard decay: broken API migration",
+    "kind": "text",
+    "sourceLabel": "Tutorial excerpt",
+    "sourceUrl": "https://reactrouter.com/en/main/upgrading/v5",
+    "text": "To navigate programmatically in React Router, call useHistory() and then history.push('/dashboard'). For route matching, wrap your routes in <Switch> and declare <Route path=...>. This is the recommended approach for React Router v6 apps.",
+    "expectedSignal": "broken_api"
+  },
+  {
+    "id": "soft-decay-deprecated-tooling",
+    "title": "Soft decay: deprecated but still working",
+    "kind": "text",
+    "sourceLabel": "StackOverflow-style answer",
+    "sourceUrl": "https://github.com/facebook/create-react-app/releases",
+    "text": "If you need a quick React setup, you can use create-react-app. It's stable and still works for many apps. For newer projects, you should prefer Vite over create-react-app, but CRA can still be fine if you already know it.",
+    "expectedSignal": "deprecated"
+  },
+  {
+    "id": "context-decay-new-environment",
+    "title": "Context decay: works, but environment assumptions changed",
+    "kind": "text",
+    "sourceLabel": "Tutorial note",
+    "sourceUrl": "https://vite.dev/guide/env-and-mode",
+    "text": "This project requires Node.js v12 or higher. Use environment variables like FIREBASE_API_KEY in your frontend code. You can deploy to Firebase Hosting and keep the config in plain env variables without any special prefix.",
+    "expectedSignal": "new_environment"
+  }
+]
