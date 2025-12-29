@@ -256,76 +256,6 @@ function classifyContentType(params: { text: string; url: string | null }): Cont
   return 'D'
 }
 
-function classifyNoScoreCategory(params: { text: string; url: string | null }): Exclude<ContentCategory, 'D'> {
-  const host = hostnameFromUrl(params.url)
-  if (host) {
-    const maintainedHosts = new Set([
-      'developer.mozilla.org',
-      'www.npmjs.com',
-      'docs.npmjs.com',
-      'nodejs.org',
-      'react.dev',
-      'nextjs.org',
-      'vite.dev',
-      'tailwindcss.com',
-      'kubernetes.io',
-      'docs.docker.com',
-      'docs.microsoft.com',
-      'learn.microsoft.com',
-      'cloud.google.com',
-      'firebase.google.com',
-      'aws.amazon.com',
-      'docs.aws.amazon.com',
-      'registry.terraform.io',
-      'docs.github.com',
-      'docs.gitlab.com',
-      'pkg.go.dev',
-      'docs.python.org',
-      'docs.oracle.com',
-    ])
-    const exact = maintainedHosts.has(host)
-    const sub = Array.from(maintainedHosts).some((h) => host === h || host.endsWith(`.${h}`))
-    if (exact || sub) return 'C'
-  }
-
-  const lower = params.text.trim().toLowerCase()
-  const foundationalMarkers = [
-    'loop',
-    'loops',
-    'array',
-    'arrays',
-    'string',
-    'strings',
-    'integer',
-    'integers',
-    'boolean',
-    'variable',
-    'variables',
-    'function',
-    'functions',
-    'syntax',
-    'data type',
-    'datatype',
-    'algorithm',
-    'algorithms',
-    'big o',
-    'time complexity',
-    'space complexity',
-    'stack',
-    'queue',
-    'hash map',
-    'hashmap',
-    'dictionary',
-    'recursion',
-    'pointer',
-    'reference',
-  ]
-  const hasFoundational = includesAny(lower, foundationalMarkers)
-  const hasKnownTechSubject = KNOWN_TECH_SUBJECTS.some((s) => typeof s === 'string' && lower.includes(s.toLowerCase()))
-  if (hasFoundational || hasKnownTechSubject) return 'B'
-  return 'A'
-}
-
 function safeJsonStringify(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2)
@@ -369,7 +299,7 @@ function downloadTextFile(opts: { filename: string; text: string; mime: string }
 function summarizeDecay(details: DecayDetail[], decayScore: number | null, status: AnalysisStatus): string {
   if (status === 'failed') return 'Analysis failed.'
   if (status === 'insufficient_signal') return 'Insufficient signal: no valid assumptions found.'
-  if (!details.length) return 'No decay detected.'
+  if (!details.length) return 'No relevant changes detected.'
   const counts = new Map<string, number>()
   for (const d of details) counts.set(d.decayClass, (counts.get(d.decayClass) ?? 0) + 1)
   const order: Array<DecayDetail['decayClass']> = ['hard', 'soft', 'risk', 'context']
@@ -378,7 +308,7 @@ function summarizeDecay(details: DecayDetail[], decayScore: number | null, statu
     .map((k) => `${k}(${counts.get(k) ?? 0})`)
     .join(', ')
   const score = decayScore === null ? '—' : String(decayScore)
-  return `Detected ${details.length} decay(s): ${parts}. Score ${score}.`
+  return `Detected ${details.length} relevance issue(s): ${parts}. Relevance score ${score}.`
 }
 
 function canonicalizeEntity(input: string): string {
@@ -671,9 +601,9 @@ function AnalyzerPage() {
           decayScore: null,
           explanationSummary:
             contentCategory === 'A'
-              ? 'This content does not contain technical instructions or dependencies that can become outdated.'
+              ? 'This content does not contain technical instructions or dependencies that could become outdated due to changes in tools or systems.'
               : contentCategory === 'B'
-                ? 'This content explains stable concepts that do not depend on changing tools or ecosystems. There is nothing here that can decay due to time.'
+                ? 'This content explains stable concepts that do not depend on changing tools, platforms, or environments. There is nothing here that can decay over time.'
                 : 'This content is maintained by the tool’s authors and is kept up to date. Relevance analysis is not necessary, but version awareness is still important.',
         }
         persistResult = result
@@ -698,22 +628,14 @@ function AnalyzerPage() {
 
       const analyzable = validateAnalyzability(resolvedText)
       if (!analyzable) {
-        const noScoreCategory = classifyNoScoreCategory({
-          text: resolvedText,
-          url: resolvedUrl ?? (kind === 'url' ? value.trim() : null),
-        })
         const result: AnalysisResult = {
-          contentCategory: noScoreCategory,
+          contentCategory: 'D',
           analysisStatus: 'insufficient_signal',
           assumptions: [],
           decayDetails: [],
           decayScore: null,
           explanationSummary:
-            noScoreCategory === 'A'
-              ? 'This content does not contain technical instructions or dependencies that can become outdated.'
-              : noScoreCategory === 'B'
-                ? 'This content explains stable concepts that do not depend on changing tools or ecosystems. There is nothing here that can decay due to time.'
-                : 'This content is maintained by the tool’s authors and is kept up to date. Relevance analysis is not necessary, but version awareness is still important.',
+            'This looks like time-sensitive technical content, but it does not include enough identifiable tools, code, or platform details for a meaningful relevance analysis.',
         }
         persistResult = result
         await persistAnalysisSession({ inputType: kind, inputValue: persistInputValue, result })
@@ -754,22 +676,14 @@ function AnalyzerPage() {
       })
 
       if (validated.length === 0) {
-        const noScoreCategory = classifyNoScoreCategory({
-          text: resolvedText,
-          url: resolvedUrl ?? (kind === 'url' ? value.trim() : null),
-        })
         const result: AnalysisResult = {
-          contentCategory: noScoreCategory,
+          contentCategory: 'D',
           analysisStatus: 'insufficient_signal',
           assumptions: [],
           decayDetails: [],
           decayScore: null,
           explanationSummary:
-            noScoreCategory === 'A'
-              ? 'This content does not contain technical instructions or dependencies that can become outdated.'
-              : noScoreCategory === 'B'
-                ? 'This content explains stable concepts that do not depend on changing tools or ecosystems. There is nothing here that can decay due to time.'
-                : 'This content is maintained by the tool’s authors and is kept up to date. Relevance analysis is not necessary, but version awareness is still important.',
+            'This input includes technical context, but it does not make specific, checkable expectations about tools, versions, or platform behavior. A relevance score would be guesswork, so none is shown.',
         }
         persistResult = result
         await persistAnalysisSession({ inputType: kind, inputValue: persistInputValue, result })
@@ -804,8 +718,8 @@ function AnalyzerPage() {
         decayDetails.length > 0
           ? summarizeDecay(decayDetails, decayScore, 'success')
           : matches.length > 0
-            ? 'No decay detected.'
-            : 'No decay detected (no anchor matches).'
+            ? 'No relevant changes detected.'
+            : 'No relevant changes detected (no anchor matches).'
       const result: AnalysisResult = {
         contentCategory: 'D',
         analysisStatus: 'success',
@@ -831,12 +745,12 @@ function AnalyzerPage() {
       })
       pushEvent({
         kind: 'mismatches_found',
-        label: `Decays classified (${decayDetails.length})${countsText ? `: ${countsText}` : ''}`,
+        label: `Relevance issues classified (${decayDetails.length})${countsText ? `: ${countsText}` : ''}`,
         status: 'done',
       })
       pushEvent({
         kind: 'final_decay_score',
-        label: `Final decay score: ${decayScore}`,
+        label: `Final relevance score: ${decayScore}`,
         status: 'done',
       })
 
@@ -1036,17 +950,20 @@ function AnalyzerPage() {
   const relevanceScore = derived?.finalScore ?? null
   const contentCategory: ContentCategory | null = displayResult ? displayResult.contentCategory : null
   const showDetailedStages = contentCategory === 'D' && !isFailed && derived && relevanceScore !== null
+  const isTimeSensitiveButNotScored = contentCategory === 'D' && displayStatus === 'insufficient_signal' && !isFailed
   const noScoreTitle =
     contentCategory === 'A'
       ? 'Not technical content'
       : contentCategory === 'B'
-        ? 'Foundational technical content'
+        ? 'Foundational knowledge — no decay applies'
         : contentCategory === 'C'
           ? 'Actively maintained documentation'
           : null
   const stage1Title =
-    isFailed || (contentCategory === 'D' && relevanceScore === null)
+    isFailed
       ? 'Analysis could not be completed'
+      : isTimeSensitiveButNotScored
+        ? 'This does not have a meaningful relevance analysis'
       : noScoreTitle
         ? noScoreTitle
         : relevanceScore !== null
@@ -1055,8 +972,10 @@ function AnalyzerPage() {
   const stage1Summary =
     !isFailed && noScoreTitle && displayResult?.explanationSummary
       ? ensureSentence(displayResult.explanationSummary)
+      : isTimeSensitiveButNotScored && displayResult?.explanationSummary
+        ? ensureSentence(displayResult.explanationSummary)
       : isFailed
-        ? 'Something prevented a complete check.'
+        ? ensureSentence(displayResult?.explanationSummary ?? session?.error ?? 'Something prevented a complete check.')
         : (() => {
             const top =
               derived?.assumptionCards.find((x) => x.decay && (x.anchor?.description || x.decay?.justification)) ?? null
@@ -1121,7 +1040,7 @@ function AnalyzerPage() {
   function downloadReportJson(): void {
     const suffix = dayjs().format('YYYYMMDD_HHmmss')
     downloadTextFile({
-      filename: `decay-report_${suffix}.json`,
+      filename: `relevance-report_${suffix}.json`,
       text: reportJson || safeJsonStringify(null),
       mime: 'application/json',
     })
@@ -1771,6 +1690,24 @@ function AnalyzerPage() {
                             </motion.div>
                           ) : null}
                         </>
+                      ) : isTimeSensitiveButNotScored ? (
+                        resultsRevealStep >= 2 ? (
+                          <motion.div
+                            initial={{ opacity: 0, y: 14, scale: 0.985, filter: 'blur(10px)' }}
+                            animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+                            transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 240, damping: 26, mass: 0.65 }}
+                            className="analyzer-storyCard surface-glass analyzer-revealCard"
+                            style={{ '--analyzer-reveal-delay': '0.06s' } as CSSProperties}
+                          >
+                            <div className="text-lg font-semibold">Why you’re seeing this</div>
+                            <div className="mt-2 text-sm text-[color:rgb(var(--color-muted))]">
+                              This is expected behavior. A relevance score is only shown when the input contains enough specific, checkable detail.
+                            </div>
+                            <div className="mt-3 text-sm text-[color:rgb(var(--color-muted))]">
+                              Try including concrete tool names, versions, commands, APIs, or deployment steps.
+                            </div>
+                          </motion.div>
+                        ) : null
                       ) : !isFailed && (contentCategory === 'A' || contentCategory === 'B' || contentCategory === 'C') ? (
                         resultsRevealStep >= 2 ? (
                           <motion.div
@@ -1791,8 +1728,8 @@ function AnalyzerPage() {
                               {contentCategory === 'A'
                                 ? 'Try pasting a tutorial, setup guide, or technical answer that references tools, versions, or deployment steps.'
                                 : contentCategory === 'B'
-                                  ? 'This is expected behavior and does not indicate an error. This content does not depend on tools or environments that change over time.'
-                                  : 'This is official documentation that is maintained by its authors. A decay score is not necessary, but you should still confirm the version and defaults you are using.'}
+                                  ? 'This is expected behavior and does not indicate an error. This content does not depend on changing tools, platforms, or environments.'
+                                  : 'This is official documentation that is maintained by its authors. A relevance score is not necessary, but you should still confirm the version and defaults you are using.'}
                             </div>
                           </motion.div>
                         ) : null
