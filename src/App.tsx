@@ -4,7 +4,7 @@ import MainLayout from './components/layout/MainLayout'
 
 const LandingPage = lazy(() => import('./pages/LandingPage.tsx'))
 const AnalyzerPage = lazy(() => import('./pages/AnalyzerPage.tsx'))
-const DemoRunnerPage = lazy(() => import('./pages/demo.tsx'))
+const HowToUsePage = lazy(() => import('./pages/demo.tsx'))
 
 function App() {
   return (
@@ -13,7 +13,7 @@ function App() {
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/analyze" element={<AnalyzerPage />} />
-          <Route path="/demo" element={<DemoRunnerPage />} />
+          <Route path="/demo" element={<HowToUsePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

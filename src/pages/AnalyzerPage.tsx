@@ -1,41 +1,43 @@
 import { Dialog, Disclosure, Tab } from '@headlessui/react'
 import {
-  ArrowDownTrayIcon,
-  ArrowPathIcon,
-  BoltIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  ClipboardIcon,
-  CodeBracketSquareIcon,
-  ShieldCheckIcon,
-  SparklesIcon,
-  XMarkIcon,
+    ArrowDownTrayIcon,
+    ArrowPathIcon,
+    BoltIcon,
+    CheckIcon,
+    ChevronDownIcon,
+    ClipboardIcon,
+    CodeBracketSquareIcon,
+    ShieldCheckIcon,
+    SparklesIcon,
+    XMarkIcon,
 } from '@heroicons/react/24/outline'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 import { signInAnonymously } from 'firebase/auth'
 import { addDoc, collection, getCountFromServer, serverTimestamp } from 'firebase/firestore'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import Button from '../components/ui/Button.tsx'
 import Card from '../components/ui/Card.tsx'
 import IconButton from '../components/ui/IconButton.tsx'
 import realitySeed from '../data/reality-seed.json'
 import {
-  KNOWN_TECH_SUBJECTS,
-  extractAssumptionsFromNormalized,
-  normalizeForAnalysis,
-  type Assumption,
-  type NormalizedInput,
+    KNOWN_TECH_SUBJECTS,
+    extractAssumptionsFromNormalized,
+    normalizeForAnalysis,
+    validateAnalyzability,
+    type Assumption,
+    type NormalizedInput,
 } from '../lib/assumptionExtractor'
 import { classifyDecays, matchDecays, scoreDecay, type DecayDetail, type RealityAnchor } from '../lib/decayEngine'
 import { getAuthClient, getFirestoreClient } from '../lib/firebase'
 import {
-  verifyCloudFirestoreConnection as runFirestoreHealthCheck,
-  seedCloudFirestoreDemoData,
-  type FirestoreTestResult,
+    verifyCloudFirestoreConnection as runFirestoreHealthCheck,
+    seedCloudFirestoreDemoData,
+    type FirestoreTestResult,
 } from '../lib/firestoreTest'
+import '../styles/pages/analyzer.css'
 
 type AnalyzerPreset = {
   kind: 'url' | 'text'
@@ -51,7 +53,10 @@ type SessionKind = 'url' | 'text'
 
 type AnalysisStatus = 'success' | 'insufficient_signal' | 'failed'
 
+type ContentCategory = 'A' | 'B' | 'C' | 'D'
+
 type AnalysisResult = {
+  contentCategory: ContentCategory
   analysisStatus: AnalysisStatus
   assumptions: Assumption[]
   decayDetails: DecayDetail[]
@@ -116,6 +121,209 @@ function clamp01(n: number): number {
   if (n < 0) return 0
   if (n > 1) return 1
   return n
+}
+
+function hostnameFromUrl(url: string | null): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+function includesAny(haystackLower: string, needlesLower: string[]): boolean {
+  for (const n of needlesLower) {
+    if (haystackLower.includes(n)) return true
+  }
+  return false
+}
+
+function classifyContentType(params: { text: string; url: string | null }): ContentCategory {
+  const text = params.text.trim()
+  const lower = text.toLowerCase()
+
+  const host = hostnameFromUrl(params.url)
+  const maintainedHosts = new Set([
+    'developer.mozilla.org',
+    'www.npmjs.com',
+    'docs.npmjs.com',
+    'nodejs.org',
+    'react.dev',
+    'nextjs.org',
+    'vite.dev',
+    'tailwindcss.com',
+    'kubernetes.io',
+    'docs.docker.com',
+    'docs.microsoft.com',
+    'learn.microsoft.com',
+    'cloud.google.com',
+    'firebase.google.com',
+    'aws.amazon.com',
+    'docs.aws.amazon.com',
+    'registry.terraform.io',
+    'docs.github.com',
+    'docs.gitlab.com',
+    'pkg.go.dev',
+    'docs.python.org',
+    'docs.oracle.com',
+  ])
+
+  if (host) {
+    const exact = maintainedHosts.has(host)
+    const sub = Array.from(maintainedHosts).some((h) => host === h || host.endsWith(`.${h}`))
+    if (exact || sub) return 'C'
+  }
+
+  const hasCodeLike = /[`{}()[\];<>]|=>|::|#include|\b(class|interface|struct|enum|function|def)\b/i.test(text)
+  const foundationalMarkers = [
+    'loop',
+    'loops',
+    'array',
+    'arrays',
+    'string',
+    'strings',
+    'integer',
+    'integers',
+    'boolean',
+    'variable',
+    'variables',
+    'function',
+    'functions',
+    'syntax',
+    'data type',
+    'datatype',
+    'algorithm',
+    'algorithms',
+    'big o',
+    'time complexity',
+    'space complexity',
+    'stack',
+    'queue',
+    'hash map',
+    'hashmap',
+    'dictionary',
+    'recursion',
+    'pointer',
+    'reference',
+  ]
+  const timeSensitiveMarkers = [
+    'install',
+    'deployment',
+    'deploy',
+    'docker',
+    'kubernetes',
+    'terraform',
+    'aws',
+    'azure',
+    'gcp',
+    'firebase',
+    'heroku',
+    'npm',
+    'yarn',
+    'pnpm',
+    'pip',
+    'brew',
+    'apt',
+    'gradle',
+    'maven',
+    'create-react-app',
+    'vite',
+    'webpack',
+    'react',
+    'next.js',
+    'react router',
+    'deprecated',
+    'migration',
+    'breaking change',
+    'upgrade',
+    'v1',
+    'v2',
+    'v3',
+    'v4',
+    'v5',
+    'v6',
+    'v7',
+  ]
+
+  const hasVersionShape = /\b(v?\d+\.\d+(\.\d+)?)\b/.test(lower)
+  const hasTimeSensitive = includesAny(lower, timeSensitiveMarkers) || hasVersionShape
+  const hasFoundational = includesAny(lower, foundationalMarkers)
+  const hasKnownTechSubject = KNOWN_TECH_SUBJECTS.some((s) => typeof s === 'string' && lower.includes(s.toLowerCase()))
+
+  if (!hasCodeLike && !hasFoundational && !hasKnownTechSubject && !hasTimeSensitive) return 'A'
+  if ((hasFoundational || hasCodeLike) && !hasTimeSensitive) return 'B'
+  return 'D'
+}
+
+function classifyNoScoreCategory(params: { text: string; url: string | null }): Exclude<ContentCategory, 'D'> {
+  const host = hostnameFromUrl(params.url)
+  if (host) {
+    const maintainedHosts = new Set([
+      'developer.mozilla.org',
+      'www.npmjs.com',
+      'docs.npmjs.com',
+      'nodejs.org',
+      'react.dev',
+      'nextjs.org',
+      'vite.dev',
+      'tailwindcss.com',
+      'kubernetes.io',
+      'docs.docker.com',
+      'docs.microsoft.com',
+      'learn.microsoft.com',
+      'cloud.google.com',
+      'firebase.google.com',
+      'aws.amazon.com',
+      'docs.aws.amazon.com',
+      'registry.terraform.io',
+      'docs.github.com',
+      'docs.gitlab.com',
+      'pkg.go.dev',
+      'docs.python.org',
+      'docs.oracle.com',
+    ])
+    const exact = maintainedHosts.has(host)
+    const sub = Array.from(maintainedHosts).some((h) => host === h || host.endsWith(`.${h}`))
+    if (exact || sub) return 'C'
+  }
+
+  const lower = params.text.trim().toLowerCase()
+  const foundationalMarkers = [
+    'loop',
+    'loops',
+    'array',
+    'arrays',
+    'string',
+    'strings',
+    'integer',
+    'integers',
+    'boolean',
+    'variable',
+    'variables',
+    'function',
+    'functions',
+    'syntax',
+    'data type',
+    'datatype',
+    'algorithm',
+    'algorithms',
+    'big o',
+    'time complexity',
+    'space complexity',
+    'stack',
+    'queue',
+    'hash map',
+    'hashmap',
+    'dictionary',
+    'recursion',
+    'pointer',
+    'reference',
+  ]
+  const hasFoundational = includesAny(lower, foundationalMarkers)
+  const hasKnownTechSubject = KNOWN_TECH_SUBJECTS.some((s) => typeof s === 'string' && lower.includes(s.toLowerCase()))
+  if (hasFoundational || hasKnownTechSubject) return 'B'
+  return 'A'
 }
 
 function safeJsonStringify(value: unknown): string {
@@ -244,25 +452,58 @@ function AnalyzerPage() {
   const [isVerifyingFirestore, setIsVerifyingFirestore] = useState(false)
   const [session, setSession] = useState<AnalyzerSession | null>(null)
   const [inspectorOpen, setInspectorOpen] = useState(false)
-  const [inspectorDocked, setInspectorDocked] = useState(false)
-  const [isDesktop, setIsDesktop] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return window.matchMedia('(min-width: 1024px)').matches
-  })
   const [copied, setCopied] = useState(false)
+  const [resultsRevealStep, setResultsRevealStep] = useState(0)
   const runSeq = useRef(0)
   const copyTimerRef = useRef<number | null>(null)
+  const revealTimersRef = useRef<number[]>([])
+  const resultsRef = useRef<HTMLDivElement | null>(null)
+  const sessionId = session?.id ?? null
+  const sessionStatus = session?.status ?? null
 
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    const mql = window.matchMedia('(min-width: 1024px)')
-    const handler = (e: MediaQueryListEvent) => {
-      setIsDesktop(e.matches)
-      if (e.matches) setInspectorOpen(false)
+    if (!sessionStatus) return
+    if (sessionStatus !== 'done' && sessionStatus !== 'error') return
+    const el = resultsRef.current
+    if (!el) return
+    const timer = window.setTimeout(() => {
+      el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+    }, 50)
+    return () => window.clearTimeout(timer)
+  }, [sessionId, sessionStatus, reduceMotion])
+
+  useEffect(() => {
+    for (const t of revealTimersRef.current) window.clearTimeout(t)
+    revealTimersRef.current = []
+
+    if (!sessionId) {
+      setResultsRevealStep(0)
+      return
     }
-    mql.addEventListener('change', handler)
-    return () => mql.removeEventListener('change', handler)
-  }, [])
+
+    if (sessionStatus !== 'done' && sessionStatus !== 'error') {
+      setResultsRevealStep(0)
+      return
+    }
+
+    if (reduceMotion) {
+      setResultsRevealStep(99)
+      return
+    }
+
+    setResultsRevealStep(0)
+
+    const schedule = [120, 360, 620, 920, 1240]
+    schedule.forEach((ms, idx) => {
+      const t = window.setTimeout(() => setResultsRevealStep(idx + 1), ms)
+      revealTimersRef.current.push(t)
+    })
+
+    return () => {
+      for (const t of revealTimersRef.current) window.clearTimeout(t)
+      revealTimersRef.current = []
+    }
+  }, [sessionId, sessionStatus, reduceMotion])
 
   const anchors = useMemo(() => {
     const list = Array.isArray(realitySeed) ? (realitySeed as RealityAnchor[]) : []
@@ -285,6 +526,7 @@ function AnalyzerPage() {
     const seq = runSeq.current + 1
     runSeq.current = seq
     const id = stableId('session')
+    const startedAtMs = Date.now()
     const initial: AnalyzerSession = {
       id,
       status: 'running',
@@ -305,9 +547,15 @@ function AnalyzerPage() {
     setSession(initial)
 
     const guard = () => runSeq.current === seq
+    const waitForMinimumDuration = async (): Promise<void> => {
+      const remainingMs = 3000 - (Date.now() - startedAtMs)
+      if (remainingMs <= 0) return
+      await new Promise<void>((resolve) => window.setTimeout(resolve, remainingMs))
+    }
 
     let persistInputValue = value.trim()
     let persistResult: AnalysisResult = {
+      contentCategory: 'D',
       analysisStatus: 'failed',
       assumptions: [],
       decayDetails: [],
@@ -409,13 +657,91 @@ function AnalyzerPage() {
         setSession((prev) => (prev ? { ...prev, resolvedText } : prev))
       }
 
+      const contentCategory = classifyContentType({
+        text: resolvedText,
+        url: resolvedUrl ?? (kind === 'url' ? value.trim() : null),
+      })
+
+      if (contentCategory !== 'D') {
+        const result: AnalysisResult = {
+          contentCategory,
+          analysisStatus: 'insufficient_signal',
+          assumptions: [],
+          decayDetails: [],
+          decayScore: null,
+          explanationSummary:
+            contentCategory === 'A'
+              ? 'This content does not contain technical instructions or dependencies that can become outdated.'
+              : contentCategory === 'B'
+                ? 'This content explains stable concepts that do not depend on changing tools or ecosystems. There is nothing here that can decay due to time.'
+                : 'This content is maintained by the tool’s authors and is kept up to date. Relevance analysis is not necessary, but version awareness is still important.',
+        }
+        persistResult = result
+        await persistAnalysisSession({ inputType: kind, inputValue: persistInputValue, result })
+        if (!guard()) return
+        await waitForMinimumDuration()
+        if (!guard()) return
+        setSession((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: 'done',
+                analysisStatus: 'insufficient_signal',
+                result,
+                completedAtMs: Date.now(),
+                error: null,
+              }
+            : prev,
+        )
+        return
+      }
+
+      const analyzable = validateAnalyzability(resolvedText)
+      if (!analyzable) {
+        const noScoreCategory = classifyNoScoreCategory({
+          text: resolvedText,
+          url: resolvedUrl ?? (kind === 'url' ? value.trim() : null),
+        })
+        const result: AnalysisResult = {
+          contentCategory: noScoreCategory,
+          analysisStatus: 'insufficient_signal',
+          assumptions: [],
+          decayDetails: [],
+          decayScore: null,
+          explanationSummary:
+            noScoreCategory === 'A'
+              ? 'This content does not contain technical instructions or dependencies that can become outdated.'
+              : noScoreCategory === 'B'
+                ? 'This content explains stable concepts that do not depend on changing tools or ecosystems. There is nothing here that can decay due to time.'
+                : 'This content is maintained by the tool’s authors and is kept up to date. Relevance analysis is not necessary, but version awareness is still important.',
+        }
+        persistResult = result
+        await persistAnalysisSession({ inputType: kind, inputValue: persistInputValue, result })
+        if (!guard()) return
+        await waitForMinimumDuration()
+        if (!guard()) return
+        setSession((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: 'done',
+                analysisStatus: 'insufficient_signal',
+                result,
+                completedAtMs: Date.now(),
+                error: null,
+              }
+            : prev,
+        )
+        return
+      }
+
       const normalized = normalizeForAnalysis({
         text: resolvedText,
         url: resolvedUrl ?? (kind === 'url' ? value.trim() : null),
       })
       setSession((prev) => (prev ? { ...prev, resolvedText, normalized } : prev))
 
-      pushEvent({ kind: 'assumptions_extracted', label: 'Extracting assumptions…', status: 'pending' })
+      pushEvent({ kind: 'assumptions_extracted', label: 'Extracting expectations…', status: 'pending' })
       const extracted = extractAssumptionsFromNormalized(normalized)
       const validated = validateAssumptions(extracted, anchors)
       if (!guard()) return
@@ -423,9 +749,47 @@ function AnalyzerPage() {
       setSession((prev) => (prev ? { ...prev, extractedAssumptions: extracted, validatedAssumptions: validated } : prev))
       pushEvent({
         kind: 'assumptions_extracted',
-        label: `Assumptions extracted (${extracted.length}), validated (${validated.length})`,
+        label: `Expectations extracted (${extracted.length}), validated (${validated.length})`,
         status: 'done',
       })
+
+      if (validated.length === 0) {
+        const noScoreCategory = classifyNoScoreCategory({
+          text: resolvedText,
+          url: resolvedUrl ?? (kind === 'url' ? value.trim() : null),
+        })
+        const result: AnalysisResult = {
+          contentCategory: noScoreCategory,
+          analysisStatus: 'insufficient_signal',
+          assumptions: [],
+          decayDetails: [],
+          decayScore: null,
+          explanationSummary:
+            noScoreCategory === 'A'
+              ? 'This content does not contain technical instructions or dependencies that can become outdated.'
+              : noScoreCategory === 'B'
+                ? 'This content explains stable concepts that do not depend on changing tools or ecosystems. There is nothing here that can decay due to time.'
+                : 'This content is maintained by the tool’s authors and is kept up to date. Relevance analysis is not necessary, but version awareness is still important.',
+        }
+        persistResult = result
+        await persistAnalysisSession({ inputType: kind, inputValue: persistInputValue, result })
+        if (!guard()) return
+        await waitForMinimumDuration()
+        if (!guard()) return
+        setSession((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: 'done',
+                analysisStatus: 'insufficient_signal',
+                result,
+                completedAtMs: Date.now(),
+                error: null,
+              }
+            : prev,
+        )
+        return
+      }
 
       pushEvent({ kind: 'anchors_matched', label: 'Matching anchors…', status: 'pending' })
       const matches = matchDecays({
@@ -443,6 +807,7 @@ function AnalyzerPage() {
             ? 'No decay detected.'
             : 'No decay detected (no anchor matches).'
       const result: AnalysisResult = {
+        contentCategory: 'D',
         analysisStatus: 'success',
         assumptions: extracted,
         decayDetails,
@@ -477,13 +842,13 @@ function AnalyzerPage() {
 
       const write = await persistAnalysisSession({ inputType: kind, inputValue: persistInputValue, result })
       if (!guard()) return
-      if (!write.ok || write.analysisSessionsCount === 0) {
-        const message = write.ok ? 'Firestore persistence failed' : `Firestore persistence failed: ${write.error}`
-        setSession((prev) => (prev ? { ...prev, status: 'error', analysisStatus: 'failed', error: message } : prev))
+      if (!write.ok) {
+        const message = `Firestore persistence failed: ${write.error}`
         pushEvent({ kind: 'error', label: message, status: 'error' })
-        return
       }
 
+      await waitForMinimumDuration()
+      if (!guard()) return
       setSession((prev) =>
         prev
           ? {
@@ -500,19 +865,22 @@ function AnalyzerPage() {
       if (!guard()) return
       const message = formatError(err)
       persistResult = {
+        contentCategory: classifyContentType({ text: value.trim(), url: kind === 'url' ? value.trim() : null }),
         analysisStatus: 'failed',
         assumptions: [],
         decayDetails: [],
         decayScore: null,
         explanationSummary: message,
       }
-      setSession((prev) => (prev ? { ...prev, status: 'error', analysisStatus: 'failed', error: message } : prev))
-      pushEvent({ kind: 'error', label: message, status: 'error' })
       await persistAnalysisSession({
         inputType: kind,
         inputValue: persistInputValue,
         result: persistResult,
       })
+      await waitForMinimumDuration()
+      if (!guard()) return
+      setSession((prev) => (prev ? { ...prev, status: 'error', analysisStatus: 'failed', error: message } : prev))
+      pushEvent({ kind: 'error', label: message, status: 'error' })
     }
   }
 
@@ -543,7 +911,7 @@ function AnalyzerPage() {
     const assumptionCards = result.assumptions.map((a) => {
       const decay = detailByAssumptionId.get(a.id) ?? null
       const anchor = decay ? anchorsById.get(decay.matchedAnchorId) ?? null : null
-      const status = decay ? 'decay' : 'unmatched'
+      const status = decay ? 'flagged' : 'no_flag'
       const evidenceUrl = decay?.evidenceUrl ?? null
       return { assumption: a, decay, anchor, status, evidenceUrl }
     })
@@ -553,7 +921,8 @@ function AnalyzerPage() {
   }, [session])
 
   const canRun = tabIndex === 0 ? Boolean(url.trim()) : Boolean(text.trim())
-  const reportJson = useMemo(() => safeJsonStringify(derived?.result ?? null), [derived])
+  const reportResult = session?.result ?? null
+  const reportJson = useMemo(() => safeJsonStringify(reportResult), [reportResult])
 
   const runPipeline = useMemo(() => {
     if (!session) return null
@@ -600,7 +969,7 @@ function AnalyzerPage() {
       id: 'extract',
       label: 'Extract',
       status: errored ? 'error' : extractStatus,
-      detail: 'Assumptions + validation',
+      detail: 'Expectations + validation',
       icon: <SparklesIcon className="h-4 w-4" aria-hidden="true" />,
     })
 
@@ -660,37 +1029,80 @@ function AnalyzerPage() {
     return { total, doneCount, fraction, hasError, stepLabel }
   }, [runPipeline])
 
-  const resultOverview = useMemo(() => {
-    if (!derived) return null
-    const counts = new Map<DecayDetail['decayClass'], number>()
-    for (const d of derived.result.decayDetails) {
-      counts.set(d.decayClass, (counts.get(d.decayClass) ?? 0) + 1)
-    }
-    const matchedAnchors = new Set(derived.result.decayDetails.map((d) => d.matchedAnchorId)).size
-    const sortedFindings = [...derived.assumptionCards]
-      .filter((x) => x.decay)
-      .sort((a, b) => {
-        const p = (c: DecayDetail['decayClass']) => (c === 'hard' ? 4 : c === 'risk' ? 3 : c === 'soft' ? 2 : 1)
-        const aC = a.decay ? p(a.decay.decayClass) : 0
-        const bC = b.decay ? p(b.decay.decayClass) : 0
-        return bC - aC || a.assumption.subject.localeCompare(b.assumption.subject)
-      })
-      .slice(0, 3)
+  const displayResult = session?.result ?? null
+  const displayStatus: AnalysisStatus | null = session?.analysisStatus ?? (displayResult ? displayResult.analysisStatus : null)
+  const storyReady = session?.status === 'done' || session?.status === 'error'
+  const isFailed = displayStatus === 'failed' || session?.status === 'error'
+  const relevanceScore = derived?.finalScore ?? null
+  const contentCategory: ContentCategory | null = displayResult ? displayResult.contentCategory : null
+  const showDetailedStages = contentCategory === 'D' && !isFailed && derived && relevanceScore !== null
+  const noScoreTitle =
+    contentCategory === 'A'
+      ? 'Not technical content'
+      : contentCategory === 'B'
+        ? 'Foundational technical content'
+        : contentCategory === 'C'
+          ? 'Actively maintained documentation'
+          : null
+  const stage1Title =
+    isFailed || (contentCategory === 'D' && relevanceScore === null)
+      ? 'Analysis could not be completed'
+      : noScoreTitle
+        ? noScoreTitle
+        : relevanceScore !== null
+          ? scoreTone(relevanceScore).headline
+          : 'Analysis could not be completed'
+  const stage1Summary =
+    !isFailed && noScoreTitle && displayResult?.explanationSummary
+      ? ensureSentence(displayResult.explanationSummary)
+      : isFailed
+        ? 'Something prevented a complete check.'
+        : (() => {
+            const top =
+              derived?.assumptionCards.find((x) => x.decay && (x.anchor?.description || x.decay?.justification)) ?? null
+            if (top?.anchor?.description) return ensureSentence(top.anchor.description)
+            if (top?.decay?.justification) return ensureSentence(top.decay.justification)
+            if (relevanceScore === null) return 'Something prevented a complete check.'
+            if (relevanceScore >= 80) return 'No major changes detected in today’s ecosystem.'
+            if (relevanceScore >= 40) return 'Some parts of this guidance may no longer apply today.'
+            return 'Key parts of this guidance may be unsafe or outdated today.'
+          })()
 
-    return {
-      counts,
-      matchedAnchors,
-      assumptions: derived.result.assumptions.length,
-      decays: derived.result.decayDetails.length,
-      findings: sortedFindings,
+  function scoreTone(
+    score: number,
+  ): { headline: string; tone: 'safe' | 'caution' | 'risk'; ringClass: string; chipClass: string } {
+    if (score >= 80) {
+      return {
+        headline: 'This information is still valid',
+        tone: 'safe',
+        ringClass: 'text-emerald-500 dark:text-emerald-400',
+        chipClass: 'bg-emerald-500/10 text-emerald-800 ring-emerald-500/20 dark:text-emerald-200',
+      }
     }
-  }, [derived])
+    if (score >= 40) {
+      return {
+        headline: 'This information is partially outdated',
+        tone: 'caution',
+        ringClass: 'text-amber-500 dark:text-amber-400',
+        chipClass: 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:text-amber-200',
+      }
+    }
+    return {
+      headline: 'This information is risky to use today',
+      tone: 'risk',
+      ringClass: 'text-rose-500 dark:text-rose-400',
+      chipClass: 'bg-rose-500/10 text-rose-800 ring-rose-500/20 dark:text-rose-200',
+    }
+  }
+
+  function ensureSentence(value: string): string {
+    const s = value.trim()
+    if (!s) return s
+    if (/[.!?]$/.test(s)) return s
+    return `${s}.`
+  }
 
   const openInspector = () => {
-    if (isDesktop) {
-      setInspectorDocked(true)
-      return
-    }
     setInspectorOpen(true)
   }
 
@@ -716,23 +1128,38 @@ function AnalyzerPage() {
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }} className="space-y-6">
-      <section className="relative overflow-hidden rounded-3xl p-6 sm:p-10 surface-glass">
-        <div className="pointer-events-none absolute inset-0">
-          <div className="absolute -top-24 left-1/2 h-[520px] w-[680px] -translate-x-1/2 rounded-full bg-[rgb(var(--color-primary))]/18 blur-3xl" />
-          <div className="absolute -bottom-28 right-[-160px] h-[520px] w-[620px] rounded-full bg-[rgb(var(--color-secondary))]/18 blur-3xl" />
-          <div className="absolute inset-0 opacity-60 [mask-image:radial-gradient(ellipse_at_center,black_55%,transparent_78%)]">
-            <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(148,163,184,0.18)_1px,transparent_1px),linear-gradient(to_bottom,rgba(148,163,184,0.14)_1px,transparent_1px)] [background-size:44px_44px]" />
-          </div>
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35 }}
+      className="analyzer-page"
+      data-reduce-motion={reduceMotion ? 'true' : 'false'}
+    >
+      <div className="analyzer-ambient" aria-hidden="true">
+        <div className="analyzer-ambientBlob" />
+        <div className="analyzer-ambientGrid" />
+      </div>
+
+      <motion.section
+        initial={{ opacity: 0, y: 14 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.4 }}
+        transition={{ type: 'spring', stiffness: 180, damping: 26, mass: 0.7 }}
+        className="analyzer-hero surface-glass"
+      >
+        <div className="analyzer-heroVfx" aria-hidden="true">
+          <div className="analyzer-heroVfxGlow" />
+          <div className="analyzer-heroVfxSweep" />
+          <div className="analyzer-heroVfxLines" />
         </div>
 
-        <div className="relative flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-          <div className="min-w-0">
-            <div className="text-balance text-2xl font-semibold tracking-tight sm:text-3xl">Analyzer</div>
-            <div className="mt-2 max-w-2xl text-pretty text-sm text-[color:rgb(var(--color-muted))] sm:text-base">
+        <div className="analyzer-heroInner">
+          <div className="analyzer-heroCopy">
+            <div className="analyzer-heroTitle">Analyzer</div>
+            <div className="analyzer-heroSubtitle">
               Paste a URL or snippet, run detection, then review a clean score + evidence-backed results.
             </div>
-            <div className="mt-4 flex flex-wrap items-center gap-2">
+            <div className="analyzer-heroBadges">
               {[
                 { label: 'Deterministic pipeline' },
                 { label: `Reality anchors: ${anchors.length}` },
@@ -740,7 +1167,7 @@ function AnalyzerPage() {
               ].map((x) => (
                 <span
                   key={x.label}
-                  className="rounded-full border border-[color:rgb(var(--color-border))] bg-[rgb(var(--color-bg))]/55 px-3 py-1 text-xs text-[color:rgb(var(--color-muted))] backdrop-blur"
+                  className="analyzer-badge"
                 >
                   {x.label}
                 </span>
@@ -748,39 +1175,56 @@ function AnalyzerPage() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="analyzer-heroActions">
             <Button
               variant="secondary"
               leftIcon={<CodeBracketSquareIcon className="h-4 w-4" aria-hidden="true" />}
               onClick={openInspector}
-              disabled={!derived}
+              disabled={!displayResult}
             >
               View JSON
             </Button>
           </div>
         </div>
-      </section>
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="min-w-0 space-y-6">
+      </motion.section>
+      <div className="analyzer-layout">
+        <div className="analyzer-main">
+      <motion.div
+        initial={{ opacity: 0, y: 14 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 180, damping: 26, mass: 0.75 }}
+      >
       <Card
         heading="Input"
         description="Choose URL or text, then run detection."
       >
         <Tab.Group selectedIndex={tabIndex} onChange={setTabIndex}>
-          <Tab.List className="inline-flex rounded-xl bg-slate-950/5 p-1 ring-1 ring-[color:rgb(var(--color-border))] dark:bg-white/5">
+          <Tab.List className="relative inline-flex rounded-xl bg-slate-950/5 p-1 ring-1 ring-[color:rgb(var(--color-border))] dark:bg-white/5">
             {['URL', 'Text'].map((label) => (
               <Tab
                 key={label}
                 className={({ selected }) =>
                   clsx(
-                    'rounded-lg px-3 py-1.5 text-sm font-semibold transition',
+                    'relative rounded-lg px-3 py-1.5 text-sm font-semibold transition focus-visible:outline-none',
                     selected
-                      ? 'bg-[rgb(var(--color-panel))] text-[color:rgb(var(--color-text))] shadow-sm ring-1 ring-[color:rgb(var(--color-border))]'
+                      ? 'text-[color:rgb(var(--color-text))]'
                       : 'text-[color:rgb(var(--color-muted))] hover:text-[color:rgb(var(--color-text))]',
                   )
                 }
               >
-                {label}
+                {({ selected }) => (
+                  <>
+                    {selected ? (
+                      <motion.span
+                        layoutId="analyzer-input-tab"
+                        className="absolute inset-0 rounded-lg bg-[rgb(var(--color-panel))] shadow-sm ring-1 ring-[color:rgb(var(--color-border))]"
+                        transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 34, mass: 0.7 }}
+                      />
+                    ) : null}
+                    <span className="relative z-10">{label}</span>
+                  </>
+                )}
               </Tab>
             ))}
           </Tab.List>
@@ -806,6 +1250,7 @@ function AnalyzerPage() {
                 <div className="mt-4 flex flex-wrap gap-3">
                   <Button
                     variant="primary"
+                    className="shadow-[0_18px_60px_rgba(99,102,241,0.28)]"
                     disabled={!url.trim() || isRunning}
                     onClick={() => runAnalysis('url', url)}
                     rightIcon={<SparklesIcon className="h-4 w-4" aria-hidden="true" />}
@@ -840,6 +1285,7 @@ function AnalyzerPage() {
                 <div className="mt-4 flex flex-wrap gap-3">
                   <Button
                     variant="primary"
+                    className="shadow-[0_18px_60px_rgba(99,102,241,0.28)]"
                     disabled={!text.trim() || isRunning}
                     onClick={() => runAnalysis('text', text)}
                     rightIcon={<SparklesIcon className="h-4 w-4" aria-hidden="true" />}
@@ -866,16 +1312,27 @@ function AnalyzerPage() {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.18 }}
-                  className="absolute inset-0 z-20 overflow-hidden rounded-2xl border border-[color:rgb(var(--color-border))] bg-[rgb(var(--color-bg))]/75 backdrop-blur"
+                  className="analyzer-runOverlay"
                 >
-                  <div className="pointer-events-none absolute inset-0 opacity-70">
-                    <motion.div
-                      className="absolute inset-0 bg-[linear-gradient(90deg,transparent,rgba(99,102,241,0.18),transparent)]"
-                      style={{ backgroundSize: '220% 100%' }}
-                      animate={reduceMotion ? undefined : { backgroundPositionX: ['0%', '100%'] }}
-                      transition={{ duration: 1.6, repeat: Infinity }}
-                    />
-                    <div className="absolute inset-0 bg-[radial-gradient(600px_320px_at_15%_15%,rgba(99,102,241,0.22),transparent_60%),radial-gradient(540px_360px_at_85%_30%,rgba(20,184,166,0.18),transparent_62%)]" />
+                  <div className="analyzer-runOverlayVfx" aria-hidden="true">
+                    <div className="analyzer-runOverlayGlow" />
+                    <div className="analyzer-runOverlayRadar" />
+                    <div className="analyzer-runOverlayRings" />
+                    <div className="analyzer-runOverlayPulse" />
+                    <div className="analyzer-runOverlayNoise" />
+                    <div className="analyzer-runOverlayData" />
+                    <div className="analyzer-runOverlayGrid analyzer-runOverlayGridPrimary" />
+                    <div className="analyzer-runOverlayGrid analyzer-runOverlayGridSecondary" />
+                    <div className="analyzer-runOverlayScan analyzer-runOverlayScanPrimary" />
+                    <div className="analyzer-runOverlayScan analyzer-runOverlayScanSecondary" />
+                    <div className="analyzer-runOverlayScanLine" />
+                    <div className="analyzer-runOverlayBrackets" />
+                    <div className="analyzer-runOverlayFlicker" />
+                    <div className="analyzer-runOverlayParticles">
+                      {Array.from({ length: 18 }).map((_, idx) => (
+                        <span key={idx} className="analyzer-runOverlayParticle" />
+                      ))}
+                    </div>
                   </div>
 
                   <div className="relative flex h-full flex-col justify-between p-4 sm:p-5">
@@ -994,12 +1451,13 @@ function AnalyzerPage() {
         <AnimatePresence>
           {session ? (
             <motion.div
+              ref={resultsRef}
               key={session.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 6 }}
               transition={{ duration: 0.25 }}
-              className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]"
+              className="mt-8 space-y-4 border-t border-[color:rgb(var(--color-border))] pt-6"
             >
               <div className="space-y-4">
                 <div className="rounded-2xl p-4 surface-panel">
@@ -1033,7 +1491,7 @@ function AnalyzerPage() {
                         onClick={openInspector}
                         aria-label="Open inspector"
                       >
-                        Inspector
+                        Technical JSON
                       </Button>
                     </div>
                   </div>
@@ -1044,343 +1502,589 @@ function AnalyzerPage() {
                     </div>
                   ) : null}
 
-                  {derived ? (
-                    <div className="mt-5 space-y-3">
-                      {resultOverview ? (
-                        <div className="rounded-2xl p-4 surface-glass">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">Overview</div>
-                              <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">
-                                {resultOverview.assumptions} assumptions • {resultOverview.matchedAnchors} matched anchors •{' '}
-                                {resultOverview.decays} decays
-                              </div>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              {(
-                                [
-                                  { k: 'hard' as const, label: 'Hard', className: 'bg-red-500/10 text-red-700 ring-red-500/20 dark:text-red-300' },
-                                  { k: 'risk' as const, label: 'Risk', className: 'bg-sky-500/10 text-sky-800 ring-sky-500/20 dark:text-sky-200' },
-                                  { k: 'soft' as const, label: 'Soft', className: 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:text-amber-200' },
-                                  { k: 'context' as const, label: 'Context', className: 'bg-slate-500/10 text-slate-700 ring-slate-500/20 dark:text-slate-200' },
-                                ] as const
-                              )
-                                .filter((x) => (resultOverview.counts.get(x.k) ?? 0) > 0)
-                                .map((x) => (
-                                  <span
-                                    key={x.k}
-                                    className={clsx('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset', x.className)}
-                                  >
-                                    {x.label} {resultOverview.counts.get(x.k) ?? 0}
-                                  </span>
-                                ))}
-                            </div>
+                  {storyReady ? (
+                    <div className="mt-5 space-y-4">
+                      {resultsRevealStep >= 1 ? (
+                        <motion.div
+                          initial={{ opacity: 0, y: 14, scale: 0.985, filter: 'blur(10px)' }}
+                          animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+                          transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 240, damping: 26, mass: 0.65 }}
+                          className="analyzer-storyCard surface-glass analyzer-revealCard"
+                          style={{ '--analyzer-reveal-delay': '0s' } as CSSProperties}
+                        >
+                          <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">Stage 1</div>
+                          <div className="mt-2 text-balance text-2xl font-semibold tracking-tight">
+                            {stage1Title}
                           </div>
+                          <div className="mt-3 text-sm text-[color:rgb(var(--color-muted))]">
+                            {stage1Summary}
+                          </div>
+                        </motion.div>
+                      ) : null}
 
-                          {resultOverview.findings.length ? (
-                            <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                              {resultOverview.findings.map((f) => (
-                                <div key={f.assumption.id} className="rounded-xl p-3 surface-panel">
-                                  <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">Top finding</div>
-                                  <div className="mt-1 truncate text-sm font-semibold">{f.assumption.subject}</div>
-                                  <div className="mt-1 line-clamp-2 text-xs text-[color:rgb(var(--color-muted))]">
-                                    {f.assumption.impliedValue}
+                      {showDetailedStages ? (
+                        <>
+                          {resultsRevealStep >= 2 ? (
+                            <motion.div
+                              initial={{ opacity: 0, y: 14, scale: 0.985, filter: 'blur(10px)' }}
+                              animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+                              transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 240, damping: 26, mass: 0.65 }}
+                              className="analyzer-storyCard surface-glass analyzer-revealCard"
+                              style={{ '--analyzer-reveal-delay': '0.06s' } as CSSProperties}
+                            >
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">Stage 2</div>
+                                  <div className="mt-2 text-lg font-semibold">Relevance Score</div>
+                                  <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">
+                                    Measures how well this information matches today’s tools and practices.
+                                  </div>
+                                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                                    {[
+                                      {
+                                        label: 'Safe (80–100)',
+                                        className: 'bg-emerald-500/10 text-emerald-800 ring-emerald-500/20 dark:text-emerald-200',
+                                      },
+                                      {
+                                        label: 'Caution (40–79)',
+                                        className: 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:text-amber-200',
+                                      },
+                                      {
+                                        label: 'High risk (0–39)',
+                                        className: 'bg-rose-500/10 text-rose-800 ring-rose-500/20 dark:text-rose-200',
+                                      },
+                                    ].map((x) => (
+                                      <span
+                                        key={x.label}
+                                        className={clsx(
+                                          'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset',
+                                          x.className,
+                                        )}
+                                      >
+                                        {x.label}
+                                      </span>
+                                    ))}
                                   </div>
                                 </div>
-                              ))}
-                            </div>
+
+                                <div className="shrink-0">
+                                  <div className="relative h-28 w-28">
+                                    <div
+                                      className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-br from-[rgb(var(--color-primary))]/20 to-[rgb(var(--color-secondary))]/15 blur-xl"
+                                      aria-hidden="true"
+                                    />
+                                    <svg
+                                      viewBox="0 0 100 100"
+                                      className={clsx('h-full w-full', scoreTone(relevanceScore).ringClass)}
+                                    >
+                                      <circle
+                                        cx="50"
+                                        cy="50"
+                                        r="44"
+                                        fill="none"
+                                        stroke="rgba(0,0,0,0.08)"
+                                        strokeWidth="10"
+                                        className="dark:stroke-white/10"
+                                      />
+                                      <motion.circle
+                                        cx="50"
+                                        cy="50"
+                                        r="44"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="10"
+                                        strokeLinecap="round"
+                                        initial={{ pathLength: 0 }}
+                                        animate={{ pathLength: relevanceScore / 100 }}
+                                        transition={{ type: 'spring', stiffness: 140, damping: 18, mass: 0.6 }}
+                                      />
+                                    </svg>
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                      <div className="text-3xl font-semibold tabular-nums">{relevanceScore}</div>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 text-center text-xs text-[color:rgb(var(--color-muted))]">
+                                    <span
+                                      className="cursor-help underline decoration-dotted underline-offset-4"
+                                      title="Low score does NOT mean wrong — it means conditions have changed."
+                                    >
+                                      What this means
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </motion.div>
                           ) : null}
-                        </div>
-                      ) : null}
-                      <div className="rounded-2xl p-4 surface-glass">
-                        <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">Decay score</div>
-                        <div className="mt-3 flex items-center gap-4">
-                          <div className="relative h-24 w-24">
-                            <div
-                              className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-br from-[rgb(var(--color-primary))]/20 to-[rgb(var(--color-secondary))]/15 blur-xl"
-                              aria-hidden="true"
-                            />
-                            <svg viewBox="0 0 100 100" className="h-full w-full">
-                              <circle
-                                cx="50"
-                                cy="50"
-                                r="44"
-                                fill="none"
-                                stroke="rgba(0,0,0,0.08)"
-                                strokeWidth="10"
-                                className="dark:stroke-white/10"
-                              />
-                              <motion.circle
-                                cx="50"
-                                cy="50"
-                                r="44"
-                                fill="none"
-                                stroke="rgb(var(--color-primary))"
-                                strokeWidth="10"
-                                strokeLinecap="round"
-                                initial={{ pathLength: 0 }}
-                                animate={{ pathLength: derived.finalScore / 100 }}
-                                transition={{ type: 'spring', stiffness: 140, damping: 18, mass: 0.6 }}
-                              />
-                            </svg>
-                            <div className="absolute inset-0 flex items-center justify-center">
-                              <div className="text-2xl font-semibold tabular-nums">{derived.finalScore}</div>
-                            </div>
-                          </div>
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold">
-                              {derived.finalScore >= 85 ? 'Healthy' : derived.finalScore >= 60 ? 'Watch' : 'High risk'}
-                            </div>
-                            <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">
-                              As-of {dayjs(derived.nowMs).format('YYYY-MM-DD')}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
 
-                      <div className="rounded-2xl p-4 surface-glass">
-                        <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">Summary</div>
-                      <div className="mt-2 text-sm text-[color:rgb(var(--color-muted))]">
-                          {derived.result.explanationSummary}
-                      </div>
-                    </div>
-                  </div>
-                  ) : null}
-                </div>
-
-                {derived ? (
-                  <div className="rounded-2xl p-4 surface-panel">
-                    <div className="text-sm font-semibold">Assumptions</div>
-                    <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">
-                      Collapsible cards show match status, severity, and evidence links.
-                    </div>
-
-                    <motion.div
-                      initial="hidden"
-                      animate="show"
-                      variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
-                      className="mt-4 space-y-2"
-                    >
-                      {derived.assumptionCards.length ? (
-                        derived.assumptionCards.map(({ assumption, decay, anchor, status, evidenceUrl }) => {
-                          const badge =
-                            status === 'decay'
-                              ? decay?.decayClass === 'hard'
-                                ? 'Hard'
-                                : decay?.decayClass === 'soft'
-                                  ? 'Soft'
-                                  : decay?.decayClass === 'risk'
-                                    ? 'Risk'
-                                    : 'Context'
-                              : 'Unmatched'
-
-                          const badgeClass =
-                            status === 'decay'
-                              ? decay?.decayClass === 'hard'
-                                ? 'bg-red-500/10 text-red-700 ring-red-500/20 dark:text-red-300'
-                                : decay?.decayClass === 'soft'
-                                  ? 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:text-amber-200'
-                                  : decay?.decayClass === 'risk'
-                                    ? 'bg-sky-500/10 text-sky-800 ring-sky-500/20 dark:text-sky-200'
-                                    : 'bg-slate-500/10 text-slate-700 ring-slate-500/20 dark:text-slate-200'
-                              : 'bg-slate-500/10 text-slate-700 ring-slate-500/20 dark:text-slate-200'
-
-                          return (
+                          {resultsRevealStep >= 3 ? (
                             <motion.div
-                              key={assumption.id}
-                              variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}
-                              transition={{ type: 'spring', stiffness: 240, damping: 26, mass: 0.6 }}
-                              whileHover={{ y: -2 }}
+                              initial={{ opacity: 0, y: 14, scale: 0.985, filter: 'blur(10px)' }}
+                              animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+                              transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 240, damping: 26, mass: 0.65 }}
+                              className="analyzer-storyCard surface-glass analyzer-revealCard"
+                              style={{ '--analyzer-reveal-delay': '0.08s' } as CSSProperties}
                             >
-                              <Disclosure defaultOpen={false}>
-                                {({ open }) => (
-                                  <div className="rounded-xl border border-[color:rgb(var(--color-border))] bg-[rgb(var(--color-bg))] transition-shadow duration-200 hover:shadow-sm">
-                                    <Disclosure.Button className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left">
-                                      <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">Stage 3</div>
+                              <div className="mt-2 text-lg font-semibold">What this content expects to be true</div>
+                              <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">
+                                These are the conditions this content relies on. When conditions change, the score drops.
+                              </div>
+
+                              <motion.div
+                                initial="hidden"
+                                animate="show"
+                                variants={{
+                                  hidden: {},
+                                  show: { transition: { staggerChildren: 0.06, delayChildren: reduceMotion ? 0 : 0.12 } },
+                                }}
+                                className="mt-4 space-y-3"
+                              >
+                                {[...derived.assumptionCards]
+                                  .sort((a, b) => {
+                                    const p = (x: typeof a) => {
+                                      const c = x.decay?.decayClass ?? null
+                                      if (c === 'hard') return 40
+                                      if (c === 'risk') return 30
+                                      if (c === 'soft') return 20
+                                      if (c === 'context') return 10
+                                      return 0
+                                    }
+                                    return p(b) - p(a) || a.assumption.subject.localeCompare(b.assumption.subject)
+                                  })
+                                  .map(({ assumption, decay, anchor, evidenceUrl }) => {
+                                    const changed =
+                                      decay?.justification?.trim() ||
+                                      anchor?.description?.trim() ||
+                                      (decay
+                                        ? 'Some relevant conditions have changed since this was written.'
+                                        : 'No relevant change was flagged for this expectation.')
+
+                                    const chip =
+                                      decay?.decayClass === 'hard'
+                                        ? {
+                                            label: 'High risk',
+                                            className: 'bg-rose-500/10 text-rose-800 ring-rose-500/20 dark:text-rose-200',
+                                          }
+                                        : decay?.decayClass === 'risk'
+                                          ? {
+                                              label: 'Risk',
+                                              className: 'bg-sky-500/10 text-sky-800 ring-sky-500/20 dark:text-sky-200',
+                                            }
+                                          : decay?.decayClass === 'soft'
+                                            ? {
+                                                label: 'Outdated',
+                                                className: 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:text-amber-200',
+                                              }
+                                            : decay?.decayClass === 'context'
+                                              ? {
+                                                  label: 'Context changed',
+                                                  className:
+                                                    'bg-slate-500/10 text-slate-700 ring-slate-500/20 dark:text-slate-200',
+                                                }
+                                              : { label: 'No flags', className: 'bg-slate-500/10 text-slate-700 ring-slate-500/20 dark:text-slate-200' }
+
+                                    return (
+                                      <motion.div
+                                        key={assumption.id}
+                                        variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}
+                                        transition={{ type: 'spring', stiffness: 240, damping: 26, mass: 0.6 }}
+                                        className="rounded-2xl border border-[color:rgb(var(--color-border))] bg-[rgb(var(--color-bg))] p-4 analyzer-revealItem"
+                                      >
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
                                           <div className="text-sm font-semibold">{assumption.subject}</div>
                                           <span
                                             className={clsx(
                                               'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset',
-                                              badgeClass,
+                                              chip.className,
                                             )}
                                           >
-                                            {badge}
-                                          </span>
-                                          <span className="text-xs text-[color:rgb(var(--color-muted))]">
-                                            {(clamp01(assumption.confidence) * 100).toFixed(0)}%
+                                            {chip.label}
                                           </span>
                                         </div>
-                                        <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">
-                                          {assumption.impliedValue}
-                                        </div>
-                                      </div>
-                                      <ChevronDownIcon
-                                        className={clsx(
-                                          'mt-0.5 h-5 w-5 shrink-0 text-[color:rgb(var(--color-muted))] transition',
-                                          open ? 'rotate-180' : 'rotate-0',
-                                        )}
-                                        aria-hidden="true"
-                                      />
-                                    </Disclosure.Button>
-                                    <Disclosure.Panel className="px-3 pb-3">
-                                    <div className="grid gap-3 md:grid-cols-2">
-                                      <div className="rounded-xl p-3 surface-panel">
-                                        <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">
-                                          Match
-                                        </div>
-                                        <div className="mt-1 text-sm">
-                                          {anchor ? (
-                                            <div className="space-y-1">
-                                              <div className="text-sm font-semibold">{anchor.id}</div>
-                                              <div className="text-sm text-[color:rgb(var(--color-muted))]">
-                                                {anchor.description ?? ''}
-                                              </div>
-                                            </div>
-                                          ) : (
-                                            <div className="text-sm text-[color:rgb(var(--color-muted))]">
-                                              No anchor matched.
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
 
-                                      <div className="rounded-xl p-3 surface-panel">
-                                        <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">
-                                          Evidence
-                                        </div>
-                                        <div className="mt-1 text-sm">
-                                          {decay ? (
-                                            <div className="space-y-1">
-                                              <div className="text-sm text-[color:rgb(var(--color-muted))]">
-                                                {decay.justification}
-                                              </div>
-                                              <div className="text-xs text-[color:rgb(var(--color-muted))]">
-                                                Rule: {decay.ruleUsed} • Match: {decay.matchType}
-                                              </div>
-                                              {evidenceUrl ? (
-                                                <a
-                                                  href={evidenceUrl}
-                                                  target="_blank"
-                                                  rel="noreferrer"
-                                                  className="text-sm font-semibold text-[rgb(var(--color-primary))] hover:underline"
-                                                >
-                                                  Open citation
-                                                </a>
-                                              ) : null}
+                                        <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_24px_minmax(0,1fr)] md:items-stretch">
+                                          <div className="rounded-xl p-3 surface-panel">
+                                            <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">It expects</div>
+                                            <div className="mt-1 text-sm text-[color:rgb(var(--color-text))]">
+                                              This content expects: {ensureSentence(assumption.impliedValue)}
                                             </div>
-                                          ) : evidenceUrl ? (
-                                            <a
-                                              href={evidenceUrl}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              className="text-sm font-semibold text-[rgb(var(--color-primary))] hover:underline"
-                                            >
-                                              Open citation
-                                            </a>
-                                          ) : (
-                                            <div className="text-sm text-[color:rgb(var(--color-muted))]">
-                                              No evidence link available.
-                                            </div>
-                                          )}
+                                          </div>
+
+                                          <div className="hidden md:flex items-center justify-center text-[color:rgb(var(--color-muted))]">
+                                            <ChevronDownIcon className="h-5 w-5 rotate-[-90deg]" aria-hidden="true" />
+                                          </div>
+
+                                          <div className="rounded-xl p-3 surface-panel">
+                                            <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">What changed?</div>
+                                            <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">{ensureSentence(changed)}</div>
+                                            {evidenceUrl ? (
+                                              <a
+                                                href={evidenceUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="mt-2 inline-flex text-sm font-semibold text-[rgb(var(--color-primary))] hover:underline"
+                                              >
+                                                Open citation
+                                              </a>
+                                            ) : null}
+                                          </div>
                                         </div>
-                                      </div>
-                                    </div>
-                                  </Disclosure.Panel>
-                                  </div>
-                                )}
-                              </Disclosure>
+                                      </motion.div>
+                                    )
+                                  })}
+                              </motion.div>
                             </motion.div>
-                          )
-                        })
-                      ) : (
-                        <div className="text-sm text-[color:rgb(var(--color-muted))]">
-                          No assumptions extracted from the input.
-                        </div>
-                      )}
-                    </motion.div>
-                  </div>
-                ) : null}
-              </div>
+                          ) : null}
 
-              <div className="space-y-4">
-                <div className="rounded-2xl p-4 surface-panel">
-                  <div className="text-sm font-semibold">Live timeline</div>
-                  <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">
-                    Incremental events as each stage completes.
-                  </div>
-                    <div className="mt-4 space-y-3">
-                      <AnimatePresence initial={false}>
-                        {session.events.map((e) => (
+                          {resultsRevealStep >= 4 ? (
+                            <motion.div
+                              initial={{ opacity: 0, y: 14, scale: 0.985, filter: 'blur(10px)' }}
+                              animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+                              transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 240, damping: 26, mass: 0.65 }}
+                              className="analyzer-storyCard surface-glass analyzer-revealCard"
+                              style={{ '--analyzer-reveal-delay': '0.1s' } as CSSProperties}
+                            >
+                              <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">Stage 4</div>
+                              <div className="mt-2 text-lg font-semibold">What should you do?</div>
+                              <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <span
+                                  className={clsx(
+                                    'inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset',
+                                    scoreTone(relevanceScore).chipClass,
+                                  )}
+                                >
+                                  {relevanceScore >= 80
+                                    ? 'Safe to follow as-is'
+                                    : relevanceScore >= 40
+                                      ? 'Follow with caution — update parts'
+                                      : 'Avoid — use newer alternatives'}
+                                </span>
+                                <span className="text-sm text-[color:rgb(var(--color-muted))]">
+                                  Suggested next step:{' '}
+                                  {relevanceScore >= 80
+                                    ? 'Spot-check any commands against current docs.'
+                                    : relevanceScore >= 40
+                                      ? 'Cross-check key steps with current official documentation.'
+                                      : 'Look for a newer guide that uses modern tooling.'}
+                                </span>
+                              </div>
+                            </motion.div>
+                          ) : null}
+                        </>
+                      ) : !isFailed && (contentCategory === 'A' || contentCategory === 'B' || contentCategory === 'C') ? (
+                        resultsRevealStep >= 2 ? (
                           <motion.div
-                            key={e.id}
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: 6 }}
-                          transition={{ type: 'spring', stiffness: 260, damping: 28, mass: 0.7 }}
-                          className="flex items-start gap-3"
-                        >
-                          <div
-                            className={clsx(
-                              'mt-1 h-2.5 w-2.5 rounded-full',
-                              e.status === 'done'
-                                ? 'bg-emerald-500'
-                                : e.status === 'error'
-                                  ? 'bg-red-500'
-                                  : 'bg-[color:rgb(var(--color-border))]',
-                            )}
-                          />
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium">{e.label}</div>
-                            <div className="mt-0.5 text-xs text-[color:rgb(var(--color-muted))] tabular-nums">
-                              {dayjs(e.createdAt).format('HH:mm:ss')}
+                            initial={{ opacity: 0, y: 14, scale: 0.985, filter: 'blur(10px)' }}
+                            animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+                            transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 240, damping: 26, mass: 0.65 }}
+                            className="analyzer-storyCard surface-glass analyzer-revealCard"
+                            style={{ '--analyzer-reveal-delay': '0.06s' } as CSSProperties}
+                          >
+                            <div className="text-lg font-semibold">
+                              {contentCategory === 'A'
+                                ? 'Guidance'
+                                : contentCategory === 'B'
+                                  ? 'Why you’re seeing this'
+                                  : 'Note'}
                             </div>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
-                    {session.events.length === 0 ? (
-                      <div className="text-sm text-[color:rgb(var(--color-muted))]">
-                        Start an analysis run to populate this timeline.
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
+                            <div className="mt-2 text-sm text-[color:rgb(var(--color-muted))]">
+                              {contentCategory === 'A'
+                                ? 'Try pasting a tutorial, setup guide, or technical answer that references tools, versions, or deployment steps.'
+                                : contentCategory === 'B'
+                                  ? 'This is expected behavior and does not indicate an error. This content does not depend on tools or environments that change over time.'
+                                  : 'This is official documentation that is maintained by its authors. A decay score is not necessary, but you should still confirm the version and defaults you are using.'}
+                            </div>
+                          </motion.div>
+                        ) : null
+                      ) : (
+                        resultsRevealStep >= 2 ? (
+                          <motion.div
+                            initial={{ opacity: 0, y: 14, scale: 0.985, filter: 'blur(10px)' }}
+                            animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+                            transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 240, damping: 26, mass: 0.65 }}
+                            className="analyzer-storyCard surface-glass analyzer-revealCard"
+                            style={{ '--analyzer-reveal-delay': '0.06s' } as CSSProperties}
+                          >
+                            <div className="text-lg font-semibold">What should you do?</div>
+                            <div className="mt-2 text-sm text-[color:rgb(var(--color-muted))]">
+                              Re-run, try a different source, or use the technical JSON to inspect what was captured.
+                            </div>
+                          </motion.div>
+                        ) : null
+                      )}
 
-                <div className="rounded-2xl p-4 surface-panel">
-                  <div className="text-sm font-semibold">Firestore diagnostic</div>
-                  <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">
-                    Confirms cloud persistence by reading back analysisSessions count.
-                  </div>
-                  <div className="mt-4">
-                    {session.firestore.status === 'idle' ? (
-                      <div className="text-sm text-[color:rgb(var(--color-muted))]">No write yet.</div>
-                    ) : session.firestore.status === 'writing' ? (
-                      <div className="text-sm text-[color:rgb(var(--color-muted))]">Writing…</div>
-                    ) : session.firestore.status === 'done' ? (
-                      <div className="space-y-2">
-                        <div className="text-sm font-semibold text-[color:rgb(var(--color-text))]">Write complete</div>
-                        <div className="text-xs text-[color:rgb(var(--color-muted))]">Path: {session.firestore.path}</div>
-                        <div className="text-xs text-[color:rgb(var(--color-muted))] tabular-nums">
-                          Firestore Stored Analyses: {session.firestore.analysisSessionsCount}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <div className="text-sm font-semibold text-red-600 dark:text-red-400">Write failed</div>
-                        <pre className="whitespace-pre-wrap text-xs leading-5 text-[color:rgb(var(--color-muted))]">
-                          {session.firestore.error}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
+                      {showDetailedStages && resultsRevealStep >= 5 ? (
+                        <Disclosure defaultOpen={false}>
+                        {({ open }) => (
+                          <div className="analyzer-storyCard surface-panel">
+                            <Disclosure.Button className="flex w-full items-center justify-between gap-3">
+                              <div className="text-sm font-semibold">Show technical details</div>
+                              <ChevronDownIcon
+                                className={clsx(
+                                  'h-5 w-5 text-[color:rgb(var(--color-muted))] transition',
+                                  open ? 'rotate-180' : 'rotate-0',
+                                )}
+                                aria-hidden="true"
+                              />
+                            </Disclosure.Button>
+                            <Disclosure.Panel className="mt-4">
+                              <div className="grid gap-4 lg:grid-cols-2">
+                                <div className="rounded-2xl p-4 surface-glass">
+                                  <div className="text-sm font-semibold">Detailed findings</div>
+                                  <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">
+                                    Expand any item to see evidence, rule details, and citations.
+                                  </div>
+
+                                  {derived ? (
+                                    <motion.div
+                                      initial="hidden"
+                                      animate="show"
+                                      variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
+                                      className="mt-4 space-y-2"
+                                    >
+                                      {derived.assumptionCards.length ? (
+                                        derived.assumptionCards.map(({ assumption, decay, anchor, status, evidenceUrl }) => {
+                                          const badge =
+                                            status === 'flagged'
+                                              ? decay?.decayClass === 'hard'
+                                                ? 'Hard'
+                                                : decay?.decayClass === 'soft'
+                                                  ? 'Soft'
+                                                  : decay?.decayClass === 'risk'
+                                                    ? 'Risk'
+                                                    : 'Context'
+                                              : 'No flags'
+
+                                          const badgeClass =
+                                            status === 'flagged'
+                                              ? decay?.decayClass === 'hard'
+                                                ? 'bg-red-500/10 text-red-700 ring-red-500/20 dark:text-red-300'
+                                                : decay?.decayClass === 'soft'
+                                                  ? 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:text-amber-200'
+                                                  : decay?.decayClass === 'risk'
+                                                    ? 'bg-sky-500/10 text-sky-800 ring-sky-500/20 dark:text-sky-200'
+                                                    : 'bg-slate-500/10 text-slate-700 ring-slate-500/20 dark:text-slate-200'
+                                              : 'bg-slate-500/10 text-slate-700 ring-slate-500/20 dark:text-slate-200'
+
+                                          return (
+                                            <motion.div
+                                              key={assumption.id}
+                                              variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}
+                                              transition={{ type: 'spring', stiffness: 240, damping: 26, mass: 0.6 }}
+                                            >
+                                              <Disclosure defaultOpen={false}>
+                                                {({ open: openItem }) => (
+                                                  <div className="rounded-xl border border-[color:rgb(var(--color-border))] bg-[rgb(var(--color-bg))] transition-shadow duration-200 hover:shadow-sm">
+                                                    <Disclosure.Button className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left">
+                                                      <div className="min-w-0">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                          <div className="text-sm font-semibold">{assumption.subject}</div>
+                                                          <span
+                                                            className={clsx(
+                                                              'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset',
+                                                              badgeClass,
+                                                            )}
+                                                          >
+                                                            {badge}
+                                                          </span>
+                                                          <span className="text-xs text-[color:rgb(var(--color-muted))]">
+                                                            {(clamp01(assumption.confidence) * 100).toFixed(0)}%
+                                                          </span>
+                                                        </div>
+                                                        <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">
+                                                          {assumption.impliedValue}
+                                                        </div>
+                                                      </div>
+                                                      <ChevronDownIcon
+                                                        className={clsx(
+                                                          'mt-0.5 h-5 w-5 shrink-0 text-[color:rgb(var(--color-muted))] transition',
+                                                          openItem ? 'rotate-180' : 'rotate-0',
+                                                        )}
+                                                        aria-hidden="true"
+                                                      />
+                                                    </Disclosure.Button>
+                                                    <Disclosure.Panel className="px-3 pb-3">
+                                                      <div className="grid gap-3 md:grid-cols-2">
+                                                        <div className="rounded-xl p-3 surface-panel">
+                                                          <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">
+                                                            Match
+                                                          </div>
+                                                          <div className="mt-1 text-sm">
+                                                            {anchor ? (
+                                                              <div className="space-y-1">
+                                                                <div className="text-sm font-semibold">{anchor.id}</div>
+                                                                <div className="text-sm text-[color:rgb(var(--color-muted))]">
+                                                                  {anchor.description ?? ''}
+                                                                </div>
+                                                              </div>
+                                                            ) : (
+                                                              <div className="text-sm text-[color:rgb(var(--color-muted))]">
+                                                                No matched change detail for this item.
+                                                              </div>
+                                                            )}
+                                                          </div>
+                                                        </div>
+
+                                                        <div className="rounded-xl p-3 surface-panel">
+                                                          <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">
+                                                            Evidence
+                                                          </div>
+                                                          <div className="mt-1 text-sm">
+                                                            {decay ? (
+                                                              <div className="space-y-1">
+                                                                <div className="text-sm text-[color:rgb(var(--color-muted))]">
+                                                                  {decay.justification}
+                                                                </div>
+                                                                <div className="text-xs text-[color:rgb(var(--color-muted))]">
+                                                                  Rule: {decay.ruleUsed} • Match: {decay.matchType}
+                                                                </div>
+                                                                {evidenceUrl ? (
+                                                                  <a
+                                                                    href={evidenceUrl}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="text-sm font-semibold text-[rgb(var(--color-primary))] hover:underline"
+                                                                  >
+                                                                    Open citation
+                                                                  </a>
+                                                                ) : null}
+                                                              </div>
+                                                            ) : evidenceUrl ? (
+                                                              <a
+                                                                href={evidenceUrl}
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                                className="text-sm font-semibold text-[rgb(var(--color-primary))] hover:underline"
+                                                              >
+                                                                Open citation
+                                                              </a>
+                                                            ) : (
+                                                              <div className="text-sm text-[color:rgb(var(--color-muted))]">
+                                                                No evidence link available.
+                                                              </div>
+                                                            )}
+                                                          </div>
+                                                        </div>
+                                                      </div>
+                                                    </Disclosure.Panel>
+                                                  </div>
+                                                )}
+                                              </Disclosure>
+                                            </motion.div>
+                                          )
+                                        })
+                                      ) : (
+                                        <div className="text-sm text-[color:rgb(var(--color-muted))]">
+                                          No extracted items are available for this input.
+                                        </div>
+                                      )}
+                                    </motion.div>
+                                  ) : (
+                                    <div className="mt-4 text-sm text-[color:rgb(var(--color-muted))]">
+                                      Run an analysis to see detailed findings.
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="space-y-4">
+                                  <div className="rounded-2xl p-4 surface-glass">
+                                    <div className="text-sm font-semibold">Live timeline</div>
+                                    <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">
+                                      Incremental events as each stage completes.
+                                    </div>
+                                    <div className="mt-4 space-y-3">
+                                      <AnimatePresence initial={false}>
+                                        {session.events.map((e) => (
+                                          <motion.div
+                                            key={e.id}
+                                            initial={{ opacity: 0, y: 8 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            exit={{ opacity: 0, y: 6 }}
+                                            transition={{ type: 'spring', stiffness: 260, damping: 28, mass: 0.7 }}
+                                            className="flex items-start gap-3"
+                                          >
+                                            <div
+                                              className={clsx(
+                                                'mt-1 h-2.5 w-2.5 rounded-full',
+                                                e.status === 'done'
+                                                  ? 'bg-emerald-500'
+                                                  : e.status === 'error'
+                                                    ? 'bg-red-500'
+                                                    : 'bg-[color:rgb(var(--color-border))]',
+                                              )}
+                                            />
+                                            <div className="min-w-0">
+                                              <div className="text-sm font-medium">{e.label}</div>
+                                              <div className="mt-0.5 text-xs text-[color:rgb(var(--color-muted))] tabular-nums">
+                                                {dayjs(e.createdAt).format('HH:mm:ss')}
+                                              </div>
+                                            </div>
+                                          </motion.div>
+                                        ))}
+                                      </AnimatePresence>
+                                      {session.events.length === 0 ? (
+                                        <div className="text-sm text-[color:rgb(var(--color-muted))]">
+                                          Start an analysis run to populate this timeline.
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-2xl p-4 surface-glass">
+                                    <div className="text-sm font-semibold">Firestore diagnostic</div>
+                                    <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">
+                                      Confirms cloud persistence by reading back analysisSessions count.
+                                    </div>
+                                    <div className="mt-4">
+                                      {session.firestore.status === 'idle' ? (
+                                        <div className="text-sm text-[color:rgb(var(--color-muted))]">No write yet.</div>
+                                      ) : session.firestore.status === 'writing' ? (
+                                        <div className="text-sm text-[color:rgb(var(--color-muted))]">Writing…</div>
+                                      ) : session.firestore.status === 'done' ? (
+                                        <div className="space-y-2">
+                                          <div className="text-sm font-semibold text-[color:rgb(var(--color-text))]">
+                                            Write complete
+                                          </div>
+                                          <div className="text-xs text-[color:rgb(var(--color-muted))]">
+                                            Path: {session.firestore.path}
+                                          </div>
+                                          <div className="text-xs text-[color:rgb(var(--color-muted))] tabular-nums">
+                                            Firestore Stored Analyses: {session.firestore.analysisSessionsCount}
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="space-y-2">
+                                          <div className="text-sm font-semibold text-red-600 dark:text-red-400">Write failed</div>
+                                          <pre className="whitespace-pre-wrap text-xs leading-5 text-[color:rgb(var(--color-muted))]">
+                                            {session.firestore.error}
+                                          </pre>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </Disclosure.Panel>
+                          </div>
+                        )}
+                        </Disclosure>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </motion.div>
           ) : null}
         </AnimatePresence>
       </Card>
+      </motion.div>
 
+      <motion.div
+        initial={{ opacity: 0, y: 14 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.25 }}
+        transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 180, damping: 26, mass: 0.75 }}
+      >
       <Card>
         <Disclosure defaultOpen={false}>
           {({ open }) => (
@@ -1440,107 +2144,8 @@ function AnalyzerPage() {
           )}
         </Disclosure>
       </Card>
+      </motion.div>
         </div>
-
-        <aside className="hidden lg:block">
-          <div className="sticky top-[88px] space-y-4">
-            <AnimatePresence initial={false}>
-              {inspectorDocked ? (
-                <motion.div
-                  key="inspector-docked"
-                  initial={{ opacity: 0, x: 16 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 16 }}
-                  transition={{ type: 'spring', stiffness: 260, damping: 28, mass: 0.7 }}
-                  className="rounded-3xl p-4 surface-glass"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold">Inspector</div>
-                      <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">
-                        Raw analysis JSON for the current result.
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <IconButton
-                        ariaLabel={copied ? 'Copied' : 'Copy JSON to clipboard'}
-                        icon={copied ? <CheckIcon className="h-5 w-5" /> : <ClipboardIcon className="h-5 w-5" />}
-                        onClick={() => void copyReportJson()}
-                        disabled={!derived}
-                      />
-                      <IconButton
-                        ariaLabel="Download JSON file"
-                        icon={<ArrowDownTrayIcon className="h-5 w-5" />}
-                        onClick={downloadReportJson}
-                        disabled={!derived}
-                      />
-                      <IconButton
-                        ariaLabel="Close inspector"
-                        icon={<XMarkIcon className="h-5 w-5" />}
-                        onClick={() => setInspectorDocked(false)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl p-3 surface-panel">
-                      <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">Score</div>
-                      <div className="mt-1 text-lg font-semibold tabular-nums">
-                        {derived ? derived.finalScore : '—'}
-                      </div>
-                    </div>
-                    <div className="rounded-xl p-3 surface-panel">
-                      <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">As-of</div>
-                      <div className="mt-1 text-sm font-semibold tabular-nums">
-                        {derived ? dayjs(derived.nowMs).format('YYYY-MM-DD') : '—'}
-                      </div>
-                    </div>
-                    <div className="rounded-xl p-3 surface-panel">
-                      <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">Mismatches</div>
-                      <div className="mt-1 text-lg font-semibold tabular-nums">
-                        {derived ? derived.result.decayDetails.length : '—'}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 overflow-hidden rounded-2xl border border-[color:rgb(var(--color-border))] bg-[rgb(var(--color-bg))]">
-                    <pre
-                      className="max-h-[calc(100vh-360px)] overflow-auto p-3 text-xs leading-5 text-[color:rgb(var(--color-muted))]"
-                      tabIndex={0}
-                      aria-label="Analysis JSON"
-                    >
-                      {reportJson}
-                    </pre>
-                  </div>
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="inspector-collapsed"
-                  initial={{ opacity: 0, x: 16 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 16 }}
-                  transition={{ type: 'spring', stiffness: 260, damping: 28, mass: 0.7 }}
-                >
-                  <Card
-                    heading="Inspector"
-                    description={derived ? 'View raw JSON and export/copy.' : 'Run an analysis to enable JSON inspection.'}
-                  >
-                    <Button
-                      variant="secondary"
-                      leftIcon={<CodeBracketSquareIcon className="h-4 w-4" />}
-                      onClick={() => setInspectorDocked(true)}
-                      disabled={!derived}
-                      aria-label="Open inspector panel"
-                      className="w-full"
-                    >
-                      Open inspector
-                    </Button>
-                  </Card>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </aside>
       </div>
 
       <AnimatePresence>

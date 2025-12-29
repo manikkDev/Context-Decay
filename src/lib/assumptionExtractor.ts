@@ -759,13 +759,16 @@ export function extractAssumptionsFromNormalized(input: NormalizedInput): Assump
   }
 
   if (out.length === 0) {
-    const prose = input.proseText.trim() ? input.proseText : normalizeText(stripHtmlSafely(input.originalText))
-    const fallback = extractFallbackAssumptionsFromProse(prose, ctx)
-    for (const a of fallback) {
-      const key = `${a.subject}|${a.ruleId}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      out.push(a)
+    const allowFallback = Boolean(input.url) || validateAnalyzability(input.originalText)
+    if (allowFallback) {
+      const prose = input.proseText.trim() ? input.proseText : normalizeText(stripHtmlSafely(input.originalText))
+      const fallback = extractFallbackAssumptionsFromProse(prose, ctx)
+      for (const a of fallback) {
+        const key = `${a.subject}|${a.ruleId}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        out.push(a)
+      }
     }
   }
 
@@ -773,6 +776,39 @@ export function extractAssumptionsFromNormalized(input: NormalizedInput): Assump
   return out
 }
 
-export async function extractAssumptions(inputText: string, opts?: { url?: string | null }): Promise<Assumption[]> {
-  return extractAssumptionsFromNormalized(normalizeForAnalysis({ text: inputText, url: opts?.url ?? null }))
+export function extractAssumptions(inputText: string, opts?: { url?: string | null }): Promise<Assumption[]> {
+  const normalized = normalizeForAnalysis({ text: inputText, url: opts?.url ?? null })
+  const primary = extractAssumptionsFromNormalized(normalized)
+  if (primary.length > 0) return Promise.resolve(primary)
+
+  const baseCtx = buildContext(normalized.proseText)
+  const ctx: ExtractContext = {
+    ...baseCtx,
+    url: normalized.url,
+    urlLower: normalized.url ? normalized.url.toLowerCase() : null,
+    codeBlocks: normalized.codeBlocks,
+    tokens: normalized.tokens,
+  }
+
+  const prose = normalized.proseText.trim() ? normalized.proseText : normalizeText(stripHtmlSafely(normalized.originalText))
+  return Promise.resolve(extractFallbackAssumptionsFromProse(prose, ctx))
+}
+
+export function validateAnalyzability(inputText: string): boolean {
+  const normalized = normalizeForAnalysis({ text: inputText })
+  const lower = normalized.normalizedLower
+  const tokens = new Set(normalized.tokens.map((t) => t.toLowerCase()))
+  const hasCodeBlock = normalized.codeBlocks.length > 0
+  const hasCli =
+    /\b(npm|npx|yarn|pnpm)\b\s+(install|add|create|init|run|exec|dlx)\b/.test(lower) ||
+    /\bnpm\s+[-\w:/]+/.test(lower) ||
+    /\bnpx\s+[-\w:/]+/.test(lower) ||
+    /\byarn\s+[-\w:/]+/.test(lower) ||
+    /\bpnpm\s+[-\w:/]+/.test(lower)
+  const hasFunctionLike = /\b[A-Za-z_$][A-Za-z0-9_$]{1,64}\s*\(/.test(normalized.originalText)
+  const knownSubjects = new Set(KNOWN_TECH_SUBJECTS.map((s) => s.toLowerCase()))
+  const hasKnownTech = Array.from(knownSubjects).some((s) => tokens.has(s))
+  const hasVersionHint = /\b(v\d+(?:\.\d+){0,2}|\d+\.\d+(?:\.\d+)?)\b/.test(lower)
+  const hasStructured = /\b(install|setup|configure|configuration|requires?|must have|version)\b/.test(lower) || hasVersionHint
+  return hasKnownTech || hasCodeBlock || hasCli || hasFunctionLike || hasStructured
 }

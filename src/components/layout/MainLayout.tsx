@@ -14,7 +14,7 @@ type MainLayoutProps = {
 
 const navItems: Array<{ to: string; label: string }> = [
   { to: '/', label: 'Landing' },
-  { to: '/demo', label: 'Demo' },
+  { to: '/demo', label: 'How to use' },
   { to: '/analyze', label: 'Analyzer' },
 ]
 

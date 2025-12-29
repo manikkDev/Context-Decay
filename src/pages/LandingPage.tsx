@@ -147,7 +147,7 @@ function LandingPage() {
                 <Button variant="primary">Open Analyzer</Button>
               </Link>
               <Link to="/demo">
-                <Button variant="secondary">View Demo</Button>
+                <Button variant="secondary">How to use</Button>
               </Link>
               <div className="ml-1 flex items-center gap-2 text-xs text-[color:rgb(var(--color-muted))]">
                 <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500/70" />
@@ -440,7 +440,7 @@ function LandingPage() {
               <Button variant="primary">Start analyzing</Button>
             </Link>
             <Link to="/demo">
-              <Button variant="secondary">Run curated demos</Button>
+              <Button variant="secondary">How to use</Button>
             </Link>
           </div>
         </div>
