@@ -264,6 +264,13 @@ function safeJsonStringify(value: unknown): string {
   }
 }
 
+function clipText(value: string, maxChars: number): string {
+  const s = value.trim()
+  if (!s) return s
+  if (s.length <= maxChars) return s
+  return `${s.slice(0, maxChars)}…`
+}
+
 async function writeClipboardText(text: string): Promise<void> {
   const clip = navigator.clipboard
   if (clip && typeof clip.writeText === 'function') {
@@ -835,7 +842,45 @@ function AnalyzerPage() {
   }, [session])
 
   const canRun = tabIndex === 0 ? Boolean(url.trim()) : Boolean(text.trim())
-  const reportResult = session?.result ?? null
+  const reportResult = useMemo(() => {
+    if (!session) return null
+    const result = session.result
+    const matchedAnchorIds = new Set(
+      (result?.decayDetails ?? []).map((d) => d.matchedAnchorId).filter((x) => typeof x === 'string'),
+    )
+    const matchedAnchors =
+      matchedAnchorIds.size > 0
+        ? session.anchors
+            .filter((a) => matchedAnchorIds.has(a.id))
+            .map((a) => ({
+              id: a.id,
+              domain: a.domain,
+              key: a.key,
+              type: a.type ?? null,
+              effectiveFrom: a.effectiveFrom,
+              severity: a.severity ?? null,
+              citationUrl: a.citationUrl ?? null,
+            }))
+        : []
+
+    return {
+      sessionId: session.id,
+      inputType: session.kind,
+      inputValue: session.input,
+      resolvedTextChars: session.resolvedText.length,
+      resolvedTextPreview: clipText(session.resolvedText, 900),
+      contentCategory: result?.contentCategory ?? null,
+      analysisStatus: result?.analysisStatus ?? session.analysisStatus ?? null,
+      extractedAssumptions: session.extractedAssumptions,
+      validatedAssumptions: session.validatedAssumptions,
+      anchorsSeededCount: session.anchors.length,
+      matchedAnchorsCount: matchedAnchors.length,
+      matchedAnchors,
+      events: session.events,
+      firestore: session.firestore,
+      result,
+    }
+  }, [session])
   const reportJson = useMemo(() => safeJsonStringify(reportResult), [reportResult])
 
   const runPipeline = useMemo(() => {
@@ -1750,12 +1795,12 @@ function AnalyzerPage() {
                         ) : null
                       )}
 
-                      {showDetailedStages && resultsRevealStep >= 5 ? (
-                        <Disclosure defaultOpen={false}>
+                      {storyReady && resultsRevealStep >= 2 ? (
+                        <Disclosure defaultOpen={true}>
                         {({ open }) => (
                           <div className="analyzer-storyCard surface-panel">
                             <Disclosure.Button className="flex w-full items-center justify-between gap-3">
-                              <div className="text-sm font-semibold">Show technical details</div>
+                              <div className="text-sm font-semibold">Technical details (how detection worked)</div>
                               <ChevronDownIcon
                                 className={clsx(
                                   'h-5 w-5 text-[color:rgb(var(--color-muted))] transition',
@@ -1916,6 +1961,119 @@ function AnalyzerPage() {
                                         </div>
                                       )}
                                     </motion.div>
+                                  ) : session ? (
+                                    <div className="mt-4 space-y-3">
+                                      <div className="rounded-xl p-3 surface-panel">
+                                        <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">Run summary</div>
+                                        <div className="mt-1 text-sm text-[color:rgb(var(--color-text))]">
+                                          Category: {session.result?.contentCategory ?? '—'} • Status:{' '}
+                                          {session.result?.analysisStatus ?? session.analysisStatus ?? '—'}
+                                        </div>
+                                        <div className="mt-1 text-xs text-[color:rgb(var(--color-muted))] tabular-nums">
+                                          Extracted: {session.extractedAssumptions.length} • Validated: {session.validatedAssumptions.length} •
+                                          Anchors seeded: {session.anchors.length} • Score:{' '}
+                                          {typeof session.result?.decayScore === 'number' ? session.result.decayScore : '—'}
+                                        </div>
+                                      </div>
+
+                                      <div className="rounded-xl p-3 surface-panel">
+                                        <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">
+                                          Validated expectations (used for scoring)
+                                        </div>
+                                        {session.validatedAssumptions.length ? (
+                                          <div className="mt-2 space-y-2">
+                                            {session.validatedAssumptions.slice(0, 20).map((a) => (
+                                              <div
+                                                key={a.id}
+                                                className="rounded-lg border border-[color:rgb(var(--color-border))] bg-[rgb(var(--color-bg))] p-2"
+                                              >
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                  <div className="text-sm font-semibold">{a.subject}</div>
+                                                  <span className="text-xs text-[color:rgb(var(--color-muted))]">{a.type}</span>
+                                                  <span className="text-xs text-[color:rgb(var(--color-muted))] tabular-nums">
+                                                    {(clamp01(a.confidence) * 100).toFixed(0)}%
+                                                  </span>
+                                                </div>
+                                                <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">{a.impliedValue}</div>
+                                              </div>
+                                            ))}
+                                            {session.validatedAssumptions.length > 20 ? (
+                                              <div className="text-xs text-[color:rgb(var(--color-muted))]">
+                                                Showing 20 of {session.validatedAssumptions.length}. Use Technical JSON for the full list.
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        ) : (
+                                          <div className="mt-2 text-sm text-[color:rgb(var(--color-muted))]">
+                                            None were validated for scoring (this is why no score was shown).
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      <div className="rounded-xl p-3 surface-panel">
+                                        <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">
+                                          Raw extracted expectations (before validation)
+                                        </div>
+                                        {session.extractedAssumptions.length ? (
+                                          <div className="mt-2 space-y-2">
+                                            {session.extractedAssumptions.slice(0, 12).map((a) => (
+                                              <div
+                                                key={a.id}
+                                                className="rounded-lg border border-[color:rgb(var(--color-border))] bg-[rgb(var(--color-bg))] p-2"
+                                              >
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                  <div className="text-sm font-semibold">{a.subject}</div>
+                                                  <span className="text-xs text-[color:rgb(var(--color-muted))]">{a.type}</span>
+                                                  <span className="text-xs text-[color:rgb(var(--color-muted))] tabular-nums">
+                                                    {(clamp01(a.confidence) * 100).toFixed(0)}%
+                                                  </span>
+                                                </div>
+                                                <div className="mt-1 text-sm text-[color:rgb(var(--color-muted))]">{a.impliedValue}</div>
+                                                <div className="mt-1 text-xs text-[color:rgb(var(--color-muted))]">
+                                                  Rule: {a.ruleId}
+                                                </div>
+                                              </div>
+                                            ))}
+                                            {session.extractedAssumptions.length > 12 ? (
+                                              <div className="text-xs text-[color:rgb(var(--color-muted))]">
+                                                Showing 12 of {session.extractedAssumptions.length}. Use Technical JSON for the full list.
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        ) : (
+                                          <div className="mt-2 text-sm text-[color:rgb(var(--color-muted))]">No extracted expectations.</div>
+                                        )}
+                                      </div>
+
+                                      {session.result?.decayDetails?.length ? (
+                                        <div className="rounded-xl p-3 surface-panel">
+                                          <div className="text-xs font-semibold text-[color:rgb(var(--color-muted))]">
+                                            Classified relevance issues
+                                          </div>
+                                          <div className="mt-2 space-y-2">
+                                            {session.result.decayDetails.slice(0, 20).map((d) => (
+                                              <div
+                                                key={`${d.assumptionId}:${d.matchedAnchorId}`}
+                                                className="rounded-lg border border-[color:rgb(var(--color-border))] bg-[rgb(var(--color-bg))] p-2"
+                                              >
+                                                <div className="text-sm font-semibold">
+                                                  {d.decayClass} • {d.ruleUsed}
+                                                </div>
+                                                <div className="mt-1 text-xs text-[color:rgb(var(--color-muted))]">
+                                                  Anchor: {d.matchedAnchorId} • Match: {d.matchType}
+                                                </div>
+                                                <div className="mt-1 text-xs text-[color:rgb(var(--color-muted))]">{d.justification}</div>
+                                              </div>
+                                            ))}
+                                            {session.result.decayDetails.length > 20 ? (
+                                              <div className="text-xs text-[color:rgb(var(--color-muted))]">
+                                                Showing 20 of {session.result.decayDetails.length}. Use Technical JSON for the full list.
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </div>
                                   ) : (
                                     <div className="mt-4 text-sm text-[color:rgb(var(--color-muted))]">
                                       Run an analysis to see detailed findings.
