@@ -261,6 +261,39 @@ function HowToUsePage() {
           ))}
         </div>
       </Card>
+
+      <Card heading="How Decay Detection Works (Scope & Limitations)">
+        <div className="max-w-3xl space-y-4 text-sm text-[color:rgb(var(--color-muted))]">
+          <div>
+            This system checks whether technical guidance still matches today’s tools and practices by comparing what the
+            content expects to be true against a curated knowledge base of approximately 25–30 high-impact ecosystem
+            changes. These are real, verifiable shifts that affected a large amount of technical content.
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-sm font-semibold text-[color:rgb(var(--color-text))]">What the knowledge base covers</div>
+            <div className="space-y-1">
+              <div>Frontend frameworks (for example: Create React App deprecation, major framework version shifts)</div>
+              <div>Package management &amp; runtimes (for example: Node.js end-of-life, npm and Yarn behavior changes)</div>
+              <div>Backend frameworks (for example: major breaking framework updates)</div>
+              <div>Cloud platforms &amp; hosting (for example: removal of free tiers, policy changes)</div>
+              <div>DevOps &amp; tooling (for example: deprecated tools, changed defaults)</div>
+            </div>
+          </div>
+
+          <div>
+            Coverage is intentionally limited. The system does not attempt to know everything, because broad coverage
+            would require guesswork. If a change is not in the knowledge base, the analyzer will not invent decay for it
+            — it will either find no relevant change, or explain that decay analysis does not apply here.
+          </div>
+
+          <div>
+            Decay analysis works best for tutorials, setup guides, blog posts, and Q&amp;A answers that recommend specific
+            tools or workflows. Foundational concepts (like loops, arrays, or algorithms) and actively maintained official
+            documentation may not receive a relevance score, because there is often nothing time-sensitive to evaluate.
+          </div>
+        </div>
+      </Card>
     </div>
   )
 }
